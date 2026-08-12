@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, FormEvent } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId } from "@/lib/business";
+import { ErrorState } from "../ErrorState";
 
 interface Task {
   id: string;
@@ -22,6 +23,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const businessId = getActiveBusinessId();
 
@@ -29,6 +31,7 @@ export default function TasksPage() {
     if (!businessId) return;
     apiFetch<Task[]>(`/api/v1/businesses/${businessId}/tasks`)
       .then(setTasks)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load tasks"))
       .finally(() => setLoading(false));
   }
 
@@ -73,6 +76,8 @@ export default function TasksPage() {
 
       {loading ? (
         <p className="text-gray-500">Loading…</p>
+      ) : error ? (
+        <ErrorState message={error} />
       ) : (
         <table className="w-full overflow-hidden rounded-card border border-gray-200 bg-white text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">

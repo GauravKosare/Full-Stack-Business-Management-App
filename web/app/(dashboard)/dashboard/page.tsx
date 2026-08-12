@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId } from "@/lib/business";
+import { ErrorState } from "../ErrorState";
 
 interface Task {
   id: string;
@@ -14,12 +15,14 @@ interface Task {
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const businessId = getActiveBusinessId();
     if (!businessId) return;
     apiFetch<Task[]>(`/api/v1/businesses/${businessId}/tasks`)
       .then(setTasks)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load dashboard"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -31,6 +34,8 @@ export default function DashboardPage() {
       <h1 className="mb-6 text-xl font-semibold text-gray-900">Dashboard</h1>
       {loading ? (
         <p className="text-gray-500">Loading…</p>
+      ) : error ? (
+        <ErrorState message={error} />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <div className="rounded-card border border-gray-200 bg-white p-5">

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { ErrorState } from "../ErrorState";
 
 interface Notification {
   id: string;
@@ -14,13 +15,16 @@ interface Notification {
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   function load() {
     apiFetch<Notification[]>("/api/v1/notifications")
       .then(setNotifications)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load notifications"))
       .finally(() => setLoading(false));
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
 
   async function markRead(id: string) {
@@ -34,6 +38,8 @@ export default function NotificationsPage() {
 
       {loading ? (
         <p className="text-gray-500">Loading…</p>
+      ) : error ? (
+        <ErrorState message={error} />
       ) : (
         <ul className="divide-y divide-gray-200 rounded-card border border-gray-200 bg-white">
           {notifications.map((n) => (

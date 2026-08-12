@@ -12,6 +12,12 @@ const OAUTH_PLATFORM_COOKIE = "oauth_platform";
 
 type Platform = "mobile" | "web";
 
+// Unlike MOBILE_AUTH_REDIRECT_URL (whose myapp:// fallback fails obviously — no
+// browser resolves a custom scheme it doesn't recognize), a forgotten WEB_APP_URL
+// would silently redirect real users to localhost in production. Guard it the same
+// way isGoogleAuthConfigured/isRazorpayConfigured guard their own routes.
+const isWebAuthConfigured = Boolean(process.env.WEB_APP_URL);
+
 // GET /api/v1/auth/google?platform=web|mobile (default mobile) — sets a random CSRF
 // state in an httpOnly cookie and passes the same value through the OAuth redirect;
 // verified against each other on callback. (passport-oauth2's own state handling
@@ -26,6 +32,13 @@ authRouter.get("/google", (req, res, next) => {
   }
 
   const platform: Platform = req.query.platform === "web" ? "web" : "mobile";
+
+  if (platform === "web" && !isWebAuthConfigured) {
+    return res
+      .status(501)
+      .json({ error: { code: "not_configured", message: "Web sign-in is not configured on this server yet (WEB_APP_URL unset)" } });
+  }
+
   const state = crypto.randomBytes(16).toString("hex");
 
   const cookieOptions = {

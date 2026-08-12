@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, FormEvent } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId } from "@/lib/business";
+import { ErrorState } from "../ErrorState";
 
 interface Member {
   id: string;
@@ -14,6 +15,7 @@ interface Member {
 export default function TeamPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("employee");
   const businessId = getActiveBusinessId();
@@ -22,6 +24,7 @@ export default function TeamPage() {
     if (!businessId) return;
     apiFetch<Member[]>(`/api/v1/businesses/${businessId}/members`)
       .then(setMembers)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load team"))
       .finally(() => setLoading(false));
   }
 
@@ -67,6 +70,8 @@ export default function TeamPage() {
 
       {loading ? (
         <p className="text-gray-500">Loading…</p>
+      ) : error ? (
+        <ErrorState message={error} />
       ) : (
         <table className="w-full overflow-hidden rounded-card border border-gray-200 bg-white text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">

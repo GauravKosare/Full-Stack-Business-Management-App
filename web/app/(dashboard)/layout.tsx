@@ -6,6 +6,8 @@ import Link from "next/link";
 import { getToken, clearToken } from "@/lib/auth";
 import { getActiveBusinessId, getActiveBusinessRole, clearActiveBusiness } from "@/lib/business";
 
+const VALID_ROLES = ["owner", "manager", "employee", "client"];
+
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", roles: ["owner", "manager", "employee"] },
   { href: "/tasks", label: "Tasks", roles: ["owner", "manager", "employee"] },
@@ -14,10 +16,12 @@ const NAV_ITEMS = [
   { href: "/notifications", label: "Notifications", roles: ["owner", "manager", "employee"] },
 ];
 
+type LayoutState = { status: "loading" } | { status: "ready"; role: string } | { status: "error"; message: string };
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [role, setRole] = useState<string | null>(null);
+  const [state, setState] = useState<LayoutState>({ status: "loading" });
 
   useEffect(() => {
     if (!getToken()) {
@@ -29,7 +33,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace("/select-business");
       return;
     }
-    setRole(getActiveBusinessRole());
+    // businessId present but role missing/invalid shouldn't happen — setActiveBusiness
+    // always sets both together — but if it ever does (corrupted localStorage, a future
+    // bug), fail loudly with a recoverable error page instead of silently rendering a
+    // blank screen with `if (!role) return null` and no way out.
+    const role = getActiveBusinessRole();
+    if (!role || !VALID_ROLES.includes(role)) {
+      setState({ status: "error", message: "Your active business selection looks corrupted or out of date." });
+      return;
+    }
+    setState({ status: "ready", role });
   }, [router]);
 
   function signOut() {
@@ -38,8 +51,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.replace("/sign-in");
   }
 
-  if (!role) return null;
+  if (state.status === "loading") return null;
 
+  if (state.status === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-8">
+        <div className="max-w-sm rounded-card border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-medium text-danger">{state.message}</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              onClick={() => router.push("/select-business")}
+              className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Choose a business
+            </button>
+            <button
+              onClick={() => router.back()}
+              className="rounded-card border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Go back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { role } = state;
   const visibleItems = NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   return (
