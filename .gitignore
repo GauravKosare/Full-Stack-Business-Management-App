@@ -5,3 +5,4 @@ dist/
 *.log
 .expo/
 .DS_Store
+client_secret*.json

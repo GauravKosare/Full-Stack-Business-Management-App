@@ -9,6 +9,8 @@ import { businessesRouter } from "./routes/businesses";
 import { membersRouter } from "./routes/members";
 import { tasksRouter } from "./routes/tasks";
 import { billingRouter, razorpayWebhookHandler } from "./routes/billing";
+import { razorpayTestRouter } from "./routes/razorpayTest";
+import { razorpayTestPageHtml } from "./publicPages/razorpayTestPage";
 
 const app = express();
 
@@ -23,6 +25,8 @@ app.post("/api/v1/razorpay/webhook", express.raw({ type: "application/json" }), 
 app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/razorpay-test", (_req, res) => res.type("html").send(razorpayTestPageHtml));
+app.use("/api/v1/razorpay-test", razorpayTestRouter);
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/businesses", businessesRouter);
