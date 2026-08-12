@@ -1,8 +1,10 @@
 # Workflow Document
 ## Cross-Platform Business Management Application
 
-**Version:** 0.1 (Draft)
+**Version:** 0.2 (Dual-platform revision)
 **Last updated:** 2026-08-12
+
+These flows apply identically to the mobile app and the web app — "client" below means whichever of the two the user is on. Platform-specific differences are called out explicitly where they exist (auth token delivery in §1, notification channel in §5); everything else is shared behavior against the same API.
 
 ---
 
@@ -14,16 +16,18 @@
 4. Owner invites teammates by email → `business_members` row created with `role`, `joined_at = null`
 5. Invitee signs in with Google OAuth → if email matches a pending invite, auto-joins that business; sets `joined_at`
 
+Token delivery after the OAuth callback differs by platform (see [TRD](02-TRD.md) §3): mobile gets a one-time code via a deep link and exchanges it for the JWT in a second request; web can receive the JWT more directly since there's no URL-scheme interception risk. The onboarding steps above are otherwise identical either way.
+
 ## 2. Billing & Subscription Lifecycle
 
-1. Owner selects a plan (Pro/Enterprise) from in-app pricing screen
+1. Owner selects a plan (Pro/Enterprise) from the pricing screen (mobile or web)
 2. API creates a Razorpay Subscription (`plan_id`, `notes: { businessId, plan }`) and returns `{ subscriptionId, keyId }` — Razorpay has no hosted checkout page to redirect to
-3. App opens Razorpay's Checkout SDK (web widget or React Native SDK) using those ids to complete authorization
+3. Client opens Razorpay's Checkout SDK — the React Native SDK on mobile, the web Checkout widget on web — using those ids to complete authorization
 4. **Source of truth is the webhook, not the client-side SDK callback** — the SDK only confirms the user completed the payment flow, not that Razorpay actually processed it
 5. Razorpay webhook `subscription.activated`/`subscription.charged` → API creates/updates `subscriptions` row (HMAC-SHA256 signature verified against the raw body)
 6. Ongoing webhooks (`subscription.charged`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.completed`) keep `subscriptions.status` and `invoices` in sync; `subscription.charged` additionally carries a payment entity recorded as an `invoices` row
 7. Feature gating middleware checks `subscriptions.status` + `plan` before allowing plan-restricted actions (e.g. employee count over free-tier limit)
-8. On `past_due`/`canceled`, app shows a billing banner; grace period logic (e.g. 3 days) before feature restriction — configurable
+8. On `past_due`/`canceled`, the client shows a billing banner; grace period logic (e.g. 3 days) before feature restriction — configurable
 
 ## 3. Task Lifecycle
 
@@ -49,8 +53,10 @@ created (open) → assigned → in_progress → done
 
 ## 5. Notification Flow
 
-- Event occurs (task assigned, due soon, billing state change, invite) → API writes `notifications` row → pushes via Expo Push (mobile) and/or email
-- App polls/subscribes for unread count on load; marks `read_at` when opened
+- Event occurs (task assigned, due soon, billing state change, invite) → API writes a `notifications` row (single source of truth, shown in-app on both platforms) → fans out by platform:
+  - **Mobile**: also pushed via Expo Push
+  - **Web**: also emailed (no browser push at MVP stage — see [TRD](02-TRD.md) §2)
+- Each client polls/subscribes for unread count on load; marks `read_at` when opened. Read state is shared — reading a notification on one platform marks it read on the other too, since it's the same `notifications` row.
 
 ## 6. Role Permission Matrix
 
@@ -66,7 +72,7 @@ created (open) → assigned → in_progress → done
 
 ## 7. Error / Edge Cases to Handle
 
-- Webhook arrives before Checkout redirect completes → app must not assume success from redirect alone
+- Webhook arrives before the client-side Checkout SDK callback fires (or vice versa) → client must not assume success from its own callback alone; the webhook-updated `subscriptions.status` is the only trustworthy source
 - Employee removed from business while having open tasks → tasks stay assigned but flagged "assignee removed" for manager reassignment
 - Duplicate Google sign-in across businesses → same `user.id` reused, new `business_members` row per business
 - Invite sent to email not yet registered → invite persists until first sign-in with matching email

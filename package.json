@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "workspaces": [
     "api",
-    "mobile"
+    "mobile",
+    "web"
   ],
   "allowScripts": {
     "@prisma/client@5.22.0": true,

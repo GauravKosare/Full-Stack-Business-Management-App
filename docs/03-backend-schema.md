@@ -1,10 +1,12 @@
 # Backend Schema Document
 ## Cross-Platform Business Management Application
 
-**Version:** 0.1 (Draft) — Prisma-style schema, PostgreSQL
+**Version:** 0.2 (Dual-platform revision) — Prisma-style schema, PostgreSQL
 **Last updated:** 2026-08-12
 
 ---
+
+This schema is platform-agnostic by design — no table encodes which client (mobile or web) created or reads a row. The mobile app and web app are equal consumers of the same tables via the same API; nothing here changes when the web app is added.
 
 ## 1. Entity Overview
 
