@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Router } from "express";
-import { passport } from "../lib/passport";
+import { passport, isGoogleAuthConfigured } from "../lib/passport";
 import { signAuthToken } from "../lib/jwt";
 import { createOneTimeCode, consumeOneTimeCode } from "../lib/oauthCodes";
 import type { User } from "@prisma/client";
@@ -13,6 +13,12 @@ const OAUTH_STATE_COOKIE = "oauth_state";
 // the same value through the OAuth redirect; verified against each other on callback.
 // (passport-oauth2's own state handling requires a session, which we don't use.)
 authRouter.get("/google", (req, res, next) => {
+  if (!isGoogleAuthConfigured) {
+    return res
+      .status(501)
+      .json({ error: { code: "not_configured", message: "Google sign-in is not configured on this server yet" } });
+  }
+
   const state = crypto.randomBytes(16).toString("hex");
   res.cookie(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
@@ -26,6 +32,12 @@ authRouter.get("/google", (req, res, next) => {
 authRouter.get(
   "/google/callback",
   (req, res, next) => {
+    if (!isGoogleAuthConfigured) {
+      return res
+        .status(501)
+        .json({ error: { code: "not_configured", message: "Google sign-in is not configured on this server yet" } });
+    }
+
     const expectedState = req.cookies?.[OAUTH_STATE_COOKIE];
     res.clearCookie(OAUTH_STATE_COOKIE);
     if (!expectedState || expectedState !== req.query.state) {

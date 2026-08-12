@@ -2,12 +2,23 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { logger } from "./logger";
 
-passport.use(
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+export const isGoogleAuthConfigured = Boolean(googleClientId && googleClientSecret);
+
+// passport-google-oauth20 throws synchronously if clientID/clientSecret are missing,
+// which would crash the whole process at import time (including on every route, not
+// just auth) before Google env vars are configured — e.g. right after a fresh deploy.
+// Skip registering the strategy instead, and let /auth/google 501 until it's configured.
+if (googleClientId && googleClientSecret) {
+  passport.use(
   new GoogleStrategy(
     {
-      clientID: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientID: googleClientId,
+      clientSecret: googleClientSecret,
       callbackURL: process.env.GOOGLE_CALLBACK_URL ?? "/api/v1/auth/google/callback",
     },
     async (_accessToken, _refreshToken, profile, done) => {
@@ -59,6 +70,9 @@ passport.use(
       }
     }
   )
-);
+  );
+} else {
+  logger.warn("GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET not set — Google sign-in routes are disabled until configured");
+}
 
 export { passport };
