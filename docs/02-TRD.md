@@ -17,7 +17,7 @@
                        ┌────────────────────┼────────────────────┐
                        ▼                    ▼                    ▼
               ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
-              │ PostgreSQL      │   │ Stripe          │   │ Google OAuth    │
+              │ PostgreSQL      │   │ Razorpay        │   │ Google OAuth    │
               │ (Supabase)      │   │ (billing)       │   │ (auth)          │
               └────────────────┘   └────────────────┘   └────────────────┘
 ```
@@ -33,7 +33,7 @@ Web admin panel is a phase-2 client consuming the same REST API — no backend c
 | ORM | Prisma | Type-safe schema, migrations |
 | Database | PostgreSQL (Supabase free tier in dev) | Row-level security available if needed later |
 | Auth | Google OAuth 2.0 + JWT session tokens | Passport.js or Supabase Auth (decide in Implementation Plan) |
-| Payments | Stripe (Checkout + Billing + Webhooks) | Test mode in dev |
+| Payments | Razorpay (Subscriptions + Webhooks) | India-available, free to start (pay-per-transaction, no monthly fee); test mode in dev |
 | Push notifications | Expo Push Notifications | Free, no extra service needed |
 | Email | Resend or SendGrid free tier | Transactional email (invites, receipts) |
 | CI/CD | GitHub Actions | Lint, typecheck, test, deploy on merge to main |
@@ -45,7 +45,7 @@ Web admin panel is a phase-2 client consuming the same REST API — no backend c
 - REST, resource-oriented (`/businesses/:id/tasks`, `/businesses/:id/employees`)
 - All endpoints scoped to a `businessId` (multi-tenant from day one)
 - AuthN via JWT bearer token; AuthZ via role middleware checking role against the business
-- Stripe webhooks on a dedicated unauthenticated route verified by Stripe signature
+- Razorpay webhooks on a dedicated unauthenticated route verified by HMAC-SHA256 signature
 - Pagination via cursor (`?cursor=`) for list endpoints
 - Consistent error shape: `{ error: { code, message } }`
 
@@ -63,7 +63,7 @@ Web admin panel is a phase-2 client consuming the same REST API — no backend c
 | Security | HTTPS only, secrets in env vars/secret manager, no PII in logs, RBAC enforced server-side (never trust client role claims alone) |
 | Data retention | Soft-delete for tasks/employees; hard-delete only on explicit account deletion request |
 | Scalability | Stateless API (horizontally scalable), DB connection pooling (PgBouncer via Supabase) |
-| Compliance | Stripe handles PCI scope (no card data touches our servers); GDPR-style data export/delete endpoints planned phase 2 |
+| Compliance | Razorpay handles PCI scope (no card data touches our servers); GDPR-style data export/delete endpoints planned phase 2 |
 
 ## 6. Environments
 
@@ -75,7 +75,7 @@ Web admin panel is a phase-2 client consuming the same REST API — no backend c
 
 | Risk | Mitigation |
 |---|---|
-| Stripe webhook reliability in dev (localhost) | Use Stripe CLI `stripe listen --forward-to` for local webhook testing |
+| Razorpay webhook reliability in dev (localhost) | Use a tunnel (ngrok/Cloudflare Tunnel) to expose localhost for Razorpay's test-mode webhook deliveries |
 | Free-tier DB/API cold starts hurting demo UX | Acceptable for dev; document as known limitation |
 | RN + Expo native module gaps (e.g. background task tracking) | Scope MVP to Expo-supported APIs only; flag anything requiring bare workflow early |
 | Multi-role auth complexity | Keep role set small (4 roles) and enforce centrally in one middleware, not scattered per-route |

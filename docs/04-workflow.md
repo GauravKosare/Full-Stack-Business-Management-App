@@ -10,18 +10,18 @@
 
 1. User signs in with Google OAuth (becomes a `user` record)
 2. User creates a business → becomes `owner` in `business_members`
-3. System creates business with `plan = free`, `status = trialing` (no Stripe customer yet)
+3. System creates business with `plan = free`, `status = trialing` (no Razorpay subscription yet)
 4. Owner invites teammates by email → `business_members` row created with `role`, `joined_at = null`
 5. Invitee signs in with Google OAuth → if email matches a pending invite, auto-joins that business; sets `joined_at`
 
 ## 2. Billing & Subscription Lifecycle
 
 1. Owner selects a plan (Pro/Enterprise) from in-app pricing screen
-2. API creates/reuses Stripe Customer for the business, creates Stripe Checkout Session, returns URL
-3. App opens Checkout in browser/webview
-4. On success, Stripe redirects back; **source of truth is the webhook, not the redirect**
-5. Stripe webhook `checkout.session.completed` → API creates/updates `subscriptions` row
-6. Ongoing webhooks (`invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`) keep `subscriptions.status` and `invoices` in sync
+2. API creates a Razorpay Subscription (`plan_id`, `notes: { businessId, plan }`) and returns `{ subscriptionId, keyId }` — Razorpay has no hosted checkout page to redirect to
+3. App opens Razorpay's Checkout SDK (web widget or React Native SDK) using those ids to complete authorization
+4. **Source of truth is the webhook, not the client-side SDK callback** — the SDK only confirms the user completed the payment flow, not that Razorpay actually processed it
+5. Razorpay webhook `subscription.activated`/`subscription.charged` → API creates/updates `subscriptions` row (HMAC-SHA256 signature verified against the raw body)
+6. Ongoing webhooks (`subscription.charged`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.completed`) keep `subscriptions.status` and `invoices` in sync; `subscription.charged` additionally carries a payment entity recorded as an `invoices` row
 7. Feature gating middleware checks `subscriptions.status` + `plan` before allowing plan-restricted actions (e.g. employee count over free-tier limit)
 8. On `past_due`/`canceled`, app shows a billing banner; grace period logic (e.g. 3 days) before feature restriction — configurable
 

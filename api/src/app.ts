@@ -8,7 +8,7 @@ import { authRouter } from "./routes/auth";
 import { businessesRouter } from "./routes/businesses";
 import { membersRouter } from "./routes/members";
 import { tasksRouter } from "./routes/tasks";
-import { billingRouter, stripeWebhookHandler } from "./routes/billing";
+import { billingRouter, razorpayWebhookHandler } from "./routes/billing";
 
 const app = express();
 
@@ -16,9 +16,9 @@ app.use(cors());
 app.use(cookieParser());
 app.use(pinoHttp({ logger }));
 
-// Stripe webhook needs the raw body for signature verification, so it must be
+// Razorpay webhook needs the raw body for HMAC signature verification, so it must be
 // mounted before the global express.json() middleware.
-app.post("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.post("/api/v1/razorpay/webhook", express.raw({ type: "application/json" }), razorpayWebhookHandler);
 
 app.use(express.json());
 

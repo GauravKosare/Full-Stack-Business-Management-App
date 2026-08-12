@@ -14,7 +14,7 @@ Small and mid-size businesses currently juggle multiple disconnected tools to ru
 ## 2. Goal
 
 Build a single cross-platform (mobile + web-ready backend) application that unifies:
-- Billing & subscription management (Stripe)
+- Billing & subscription management (Razorpay)
 - Task scheduling
 - Employee performance tracking
 - Multi-role authentication (Owner / Manager / Employee / Client, via Google OAuth)
@@ -38,7 +38,7 @@ Target outcome: reduce operational overhead and improve task-tracking efficiency
    - Invite flow for adding employees/managers to a business account
 
 2. **Billing & Subscriptions**
-   - Stripe Checkout for subscription plans (per business account)
+   - Razorpay Subscriptions for subscription plans (per business account) — chosen over Stripe because Stripe isn't available for standard self-serve merchant accounts in India
    - Webhook-driven subscription state sync (active, past_due, canceled)
    - Plan tiers (e.g. Free / Pro / Enterprise) gating feature access
    - Invoice history view
@@ -67,12 +67,12 @@ Target outcome: reduce operational overhead and improve task-tracking efficiency
 ## 6. Success Metrics
 
 - Task completion turnaround time (target: -40% vs. manual/spreadsheet baseline)
-- % of businesses with active Stripe subscription after 14-day trial
+- % of businesses with active Razorpay subscription after 14-day trial
 - Weekly active managers/employees per account
 
 ## 7. Constraints & Assumptions
 
-- Free/low-cost tooling for development phase (Supabase free tier, Stripe test mode, Expo, Render/Railway free tier)
+- Free/low-cost tooling for development phase (Supabase free tier, Razorpay test mode, Expo, Render/Railway free tier)
 - Single region deployment initially
 - English-only UI for v1
 
@@ -80,7 +80,7 @@ Target outcome: reduce operational overhead and improve task-tracking efficiency
 
 1. Docs & architecture (this set of 6 documents)
 2. Backend + DB schema + auth
-3. Billing module (Stripe)
+3. Billing module (Razorpay)
 4. Task scheduling module
 5. Employee performance module
 6. Mobile app (React Native/Expo) wired to API

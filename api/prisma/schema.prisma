@@ -81,7 +81,6 @@ model Business {
   name              String
   ownerId           String   @map("owner_id")
   owner             User     @relation("BusinessOwner", fields: [ownerId], references: [id])
-  stripeCustomerId  String?  @unique @map("stripe_customer_id")
   createdAt         DateTime @default(now()) @map("created_at")
 
   members             BusinessMember[]
@@ -109,28 +108,28 @@ model BusinessMember {
 }
 
 model Subscription {
-  id                    String             @id @default(uuid())
-  businessId            String             @unique @map("business_id")
-  business              Business           @relation(fields: [businessId], references: [id])
-  stripeSubscriptionId  String             @unique @map("stripe_subscription_id")
-  plan                  Plan
-  status                SubscriptionStatus
-  currentPeriodEnd      DateTime           @map("current_period_end")
-  createdAt             DateTime           @default(now()) @map("created_at")
-  updatedAt             DateTime           @updatedAt @map("updated_at")
+  id                      String             @id @default(uuid())
+  businessId              String             @unique @map("business_id")
+  business                Business           @relation(fields: [businessId], references: [id])
+  razorpaySubscriptionId  String             @unique @map("razorpay_subscription_id")
+  plan                    Plan
+  status                  SubscriptionStatus
+  currentPeriodEnd        DateTime           @map("current_period_end")
+  createdAt               DateTime           @default(now()) @map("created_at")
+  updatedAt               DateTime           @updatedAt @map("updated_at")
 
   @@map("subscriptions")
 }
 
 model Invoice {
-  id               String        @id @default(uuid())
-  businessId       String        @map("business_id")
-  business         Business      @relation(fields: [businessId], references: [id])
-  stripeInvoiceId  String        @unique @map("stripe_invoice_id")
-  amountDue        Int           @map("amount_due")
-  status           InvoiceStatus
-  issuedAt         DateTime      @map("issued_at")
-  pdfUrl           String?       @map("pdf_url")
+  id                String        @id @default(uuid())
+  businessId        String        @map("business_id")
+  business          Business      @relation(fields: [businessId], references: [id])
+  razorpayPaymentId String        @unique @map("razorpay_payment_id")
+  amountDue         Int           @map("amount_due")
+  status            InvoiceStatus
+  issuedAt          DateTime      @map("issued_at")
+  pdfUrl            String?       @map("pdf_url")
 
   @@map("invoices")
 }

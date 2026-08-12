@@ -31,11 +31,11 @@
 
 ## Phase 2 — Billing Module
 
-1. Stripe account (test mode) + products/prices for Free/Pro/Enterprise
-2. Checkout session endpoint + webhook endpoint (signature-verified)
+1. Razorpay account (test mode) + Plans for Pro/Enterprise
+2. Subscription-creation endpoint + webhook endpoint (HMAC signature-verified)
 3. `subscriptions` + `invoices` sync from webhook events
 4. Feature-gating middleware reading `subscriptions.status`/`plan`
-5. Local webhook testing via `stripe listen`
+5. Local webhook testing via a tunnel (ngrok/Cloudflare Tunnel) since Razorpay has no CLI equivalent to `stripe listen`
 
 **Exit criteria:** full trial → upgrade → webhook-confirmed active subscription → invoice recorded, in test mode end to end.
 
@@ -58,7 +58,7 @@
 3. Business switcher + create/join business screens
 4. Task list/detail/create screens wired to API
 5. Team + performance screens (role-gated navigation)
-6. Billing screen + Stripe Checkout handoff (in-app browser)
+6. Billing screen + Razorpay Checkout SDK handoff (React Native SDK)
 7. Notifications screen + push registration
 
 ## Phase 6 — CI/CD

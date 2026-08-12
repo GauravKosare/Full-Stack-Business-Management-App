@@ -1,130 +1,159 @@
-import { Router } from "express";
-import Stripe from "stripe";
+import { Router, Request, Response } from "express";
+import crypto from "node:crypto";
+import Razorpay from "razorpay";
 import { Plan, SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
+export const isRazorpayConfigured = Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+
+// The Razorpay SDK throws synchronously if key_id/key_secret are missing, which would
+// crash the whole process at import time (same failure mode passport-google-oauth20 had)
+// before Razorpay env vars are configured — e.g. right after a fresh deploy. Construct
+// lazily instead, only once a route handler actually needs it.
+let razorpayClient: Razorpay | null = null;
+function getRazorpay(): Razorpay {
+  if (!razorpayClient) {
+    razorpayClient = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID!,
+      key_secret: process.env.RAZORPAY_KEY_SECRET!,
+    });
+  }
+  return razorpayClient;
+}
 
 export const billingRouter = Router({ mergeParams: true });
 
-const PRICE_IDS: Record<"pro" | "enterprise", string | undefined> = {
-  pro: process.env.STRIPE_PRICE_PRO,
-  enterprise: process.env.STRIPE_PRICE_ENTERPRISE,
+const PLAN_IDS: Record<"pro" | "enterprise", string | undefined> = {
+  pro: process.env.RAZORPAY_PLAN_PRO,
+  enterprise: process.env.RAZORPAY_PLAN_ENTERPRISE,
 };
 
-// Stripe's subscription.status has more values than our Prisma enum models (see
-// https://stripe.com/docs/api/subscriptions/object#subscription_object-status) — map
-// explicitly rather than casting, so an unmapped status fails loudly in review, not at
-// runtime against the DB.
-const STRIPE_TO_PRISMA_STATUS: Record<Stripe.Subscription.Status, SubscriptionStatus> = {
-  trialing: SubscriptionStatus.trialing,
+// Razorpay subscription.status values: created, authenticated, active, pending, halted,
+// cancelled, completed, expired — mapped explicitly onto our narrower Prisma enum,
+// same reasoning as the old Stripe status map: fail loudly on an unmapped value
+// instead of casting past the type error.
+const RAZORPAY_TO_PRISMA_STATUS: Record<string, SubscriptionStatus> = {
+  created: SubscriptionStatus.incomplete,
+  authenticated: SubscriptionStatus.incomplete,
   active: SubscriptionStatus.active,
-  past_due: SubscriptionStatus.past_due,
-  canceled: SubscriptionStatus.canceled,
-  incomplete: SubscriptionStatus.incomplete,
-  incomplete_expired: SubscriptionStatus.canceled,
-  unpaid: SubscriptionStatus.past_due,
-  paused: SubscriptionStatus.canceled,
+  pending: SubscriptionStatus.past_due,
+  halted: SubscriptionStatus.past_due,
+  cancelled: SubscriptionStatus.canceled,
+  completed: SubscriptionStatus.canceled,
+  expired: SubscriptionStatus.canceled,
 };
 
-// POST /api/v1/businesses/:businessId/billing/checkout-session — Owner only
+// POST /api/v1/businesses/:businessId/billing/subscription — Owner only
+// Unlike Stripe Checkout, Razorpay has no hosted payment page to redirect to — the
+// client (web or React Native) opens Razorpay's own Checkout SDK using the ids
+// returned here to complete authorization; the actual state change arrives via webhook.
 billingRouter.post(
-  "/checkout-session",
+  "/subscription",
   requireAuth,
   requireRole("owner"),
   async (req, res) => {
+    if (!isRazorpayConfigured) {
+      return res
+        .status(501)
+        .json({ error: { code: "not_configured", message: "Billing is not configured on this server yet" } });
+    }
+
     const plan = req.body?.plan as "pro" | "enterprise" | undefined;
-    const priceId = plan ? PRICE_IDS[plan] : undefined;
-    if (!plan || !priceId) {
+    const planId = plan ? PLAN_IDS[plan] : undefined;
+    if (!plan || !planId) {
       return res.status(400).json({ error: { code: "bad_request", message: "Unknown or unconfigured plan" } });
     }
 
     const business = await prisma.business.findUniqueOrThrow({ where: { id: req.params.businessId } });
 
-    const customerId =
-      business.stripeCustomerId ??
-      (
-        await stripe.customers.create({
-          name: business.name,
-          metadata: { businessId: business.id },
-        })
-      ).id;
-
-    if (!business.stripeCustomerId) {
-      await prisma.business.update({ where: { id: business.id }, data: { stripeCustomerId: customerId } });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${process.env.APP_URL}/billing/success`,
-      cancel_url: `${process.env.APP_URL}/billing/cancel`,
-      metadata: { businessId: business.id },
-      // Read back from subscription.metadata in the webhook — more reliable than
-      // inferring the plan from a Stripe Price's lookup_key, which requires separate
-      // manual configuration in the Stripe Dashboard and is easy to forget.
-      subscription_data: { metadata: { businessId: business.id, plan } },
+    const subscription = await getRazorpay().subscriptions.create({
+      plan_id: planId,
+      customer_notify: 1,
+      // Razorpay requires a finite number of billing cycles; 120 months (~10 years)
+      // stands in for "until cancelled" since there's no unlimited option.
+      total_count: 120,
+      notes: { businessId: business.id, plan },
     });
 
-    res.json({ url: session.url });
+    res.json({ subscriptionId: subscription.id, keyId: process.env.RAZORPAY_KEY_ID });
   }
 );
 
-// Stripe requires the raw body for signature verification — mounted separately in server.ts
-// with express.raw(), NOT the global express.json() middleware.
-export async function stripeWebhookHandler(req: import("express").Request, res: import("express").Response) {
-  const signature = req.headers["stripe-signature"];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+function resolvePeriodEnd(entity: { current_end?: number; charge_at?: number; start_at?: number }): Date {
+  const epochSeconds = entity.current_end ?? entity.charge_at ?? entity.start_at;
+  return epochSeconds ? new Date(epochSeconds * 1000) : new Date();
+}
+
+// Razorpay requires the raw body to verify the HMAC-SHA256 webhook signature — mounted
+// separately in app.ts with express.raw(), NOT the global express.json() middleware.
+export async function razorpayWebhookHandler(req: Request, res: Response) {
+  const signature = req.headers["x-razorpay-signature"] as string | undefined;
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   if (!signature || !webhookSecret) {
     return res.status(400).send("Missing signature or webhook secret");
   }
 
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
-  } catch (err) {
-    return res.status(400).send(`Webhook signature verification failed: ${(err as Error).message}`);
+  const expectedSignature = crypto.createHmac("sha256", webhookSecret).update(req.body).digest("hex");
+  const signatureValid =
+    signature.length === expectedSignature.length &&
+    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+
+  if (!signatureValid) {
+    return res.status(400).send("Webhook signature verification failed");
   }
 
-  switch (event.type) {
-    case "checkout.session.completed":
-    case "customer.subscription.updated":
-    case "customer.subscription.deleted": {
-      const subscriptionId =
-        event.type === "checkout.session.completed"
-          ? ((event.data.object as Stripe.Checkout.Session).subscription as string)
-          : (event.data.object as Stripe.Subscription).id;
+  const event = JSON.parse(req.body.toString());
 
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      const businessId = subscription.metadata?.businessId;
-      const customer = subscription.customer as string;
+  switch (event.event) {
+    case "subscription.activated":
+    case "subscription.charged":
+    case "subscription.pending":
+    case "subscription.halted":
+    case "subscription.cancelled":
+    case "subscription.completed": {
+      const subscriptionEntity = event.payload?.subscription?.entity;
+      const businessId = subscriptionEntity?.notes?.businessId as string | undefined;
+      if (!businessId) break;
 
-      const business = businessId
-        ? await prisma.business.findUnique({ where: { id: businessId } })
-        : await prisma.business.findUnique({ where: { stripeCustomerId: customer } });
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      if (!business) break;
 
-      if (business) {
-        const plan: Plan = subscription.metadata?.plan === "enterprise" ? Plan.enterprise : Plan.pro;
-        const status = STRIPE_TO_PRISMA_STATUS[subscription.status];
+      const plan: Plan = subscriptionEntity.notes?.plan === "enterprise" ? Plan.enterprise : Plan.pro;
+      const status = RAZORPAY_TO_PRISMA_STATUS[subscriptionEntity.status] ?? SubscriptionStatus.incomplete;
 
-        await prisma.subscription.upsert({
-          where: { businessId: business.id },
-          update: {
-            stripeSubscriptionId: subscription.id,
-            plan,
-            status,
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          },
+      await prisma.subscription.upsert({
+        where: { businessId: business.id },
+        update: {
+          razorpaySubscriptionId: subscriptionEntity.id,
+          plan,
+          status,
+          currentPeriodEnd: resolvePeriodEnd(subscriptionEntity),
+        },
+        create: {
+          businessId: business.id,
+          razorpaySubscriptionId: subscriptionEntity.id,
+          plan,
+          status,
+          currentPeriodEnd: resolvePeriodEnd(subscriptionEntity),
+        },
+      });
+
+      // subscription.charged carries a payment entity alongside the subscription — record
+      // it as an invoice. Other event types (activated/pending/etc.) have no payment yet.
+      const paymentEntity = event.payload?.payment?.entity;
+      if (paymentEntity) {
+        await prisma.invoice.upsert({
+          where: { razorpayPaymentId: paymentEntity.id },
+          update: {},
           create: {
             businessId: business.id,
-            stripeSubscriptionId: subscription.id,
-            plan,
-            status,
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            razorpayPaymentId: paymentEntity.id,
+            amountDue: paymentEntity.amount,
+            status: paymentEntity.status === "captured" ? "paid" : "open",
+            issuedAt: new Date(paymentEntity.created_at * 1000),
           },
         });
       }

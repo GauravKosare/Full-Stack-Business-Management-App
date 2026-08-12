@@ -41,7 +41,7 @@ Bottom Tab Bar (mobile)
 | **Team (members list)** | Avatar, name, role badge, invite button, tap → member detail |
 | **Member detail / performance** | Completion rate, on-time rate, review history, "add review" (Manager+) |
 | **Billing** | Current plan card, usage vs. limits, "Upgrade" CTA, invoice history list |
-| **Pricing/Upgrade** | Plan comparison cards → Stripe Checkout handoff |
+| **Pricing/Upgrade** | Plan comparison cards → Razorpay Checkout SDK handoff |
 | **Notifications** | Chronological list, unread indicator, tap-through to source (task/invoice) |
 
 ## 4. Design System Basics

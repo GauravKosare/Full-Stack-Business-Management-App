@@ -35,7 +35,6 @@ User ──< BusinessMember >── Business ──< Subscription
 | id | uuid PK | |
 | name | text | |
 | owner_id | uuid FK → users.id | |
-| stripe_customer_id | text | nullable, unique |
 | created_at | timestamptz | |
 
 ### business_members
@@ -54,9 +53,9 @@ User ──< BusinessMember >── Business ──< Subscription
 |---|---|---|
 | id | uuid PK | |
 | business_id | uuid FK → businesses.id, unique | one active subscription per business |
-| stripe_subscription_id | text unique | |
+| razorpay_subscription_id | text unique | |
 | plan | enum('free','pro','enterprise') | |
-| status | enum('trialing','active','past_due','canceled','incomplete') | mirrors Stripe status |
+| status | enum('trialing','active','past_due','canceled','incomplete') | mirrors Razorpay subscription status (created/authenticated→incomplete, active→active, pending/halted→past_due, cancelled/completed/expired→canceled) |
 | current_period_end | timestamptz | |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
@@ -66,8 +65,8 @@ User ──< BusinessMember >── Business ──< Subscription
 |---|---|---|
 | id | uuid PK | |
 | business_id | uuid FK → businesses.id | |
-| stripe_invoice_id | text unique | |
-| amount_due | integer | cents |
+| razorpay_payment_id | text unique | |
+| amount_due | integer | paise |
 | status | enum('draft','open','paid','void','uncollectible') | |
 | issued_at | timestamptz | |
 | pdf_url | text | nullable |
