@@ -84,6 +84,14 @@ performanceReviewsRouter.post("/", requireRole("owner", "manager"), async (req: 
   }
 
   const businessId = req.params.businessId as string;
+
+  const targetMembership = await getMembership(businessId, parsed.data.employeeId);
+  if (!targetMembership?.joinedAt) {
+    return res
+      .status(400)
+      .json({ error: { code: "bad_request", message: "employeeId is not a member of this business" } });
+  }
+
   const rates = await computeRates(businessId, parsed.data.employeeId);
 
   const review = await prisma.performanceReview.create({
