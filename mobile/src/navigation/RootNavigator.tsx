@@ -9,7 +9,17 @@ import SelectBusinessScreen from "../screens/SelectBusinessScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
 import MainTabs from "./MainTabs";
 
-const Stack = createNativeStackNavigator();
+// Exported so screens nested inside MainTabs (e.g. ProfileScreen navigating to
+// "Notifications", which lives on this outer stack, not the tab navigator) get real
+// type-checking on navigation.navigate() calls instead of an untyped string.
+export type RootStackParamList = {
+  SignIn: undefined;
+  SelectBusiness: undefined;
+  Main: undefined;
+  Notifications: undefined;
+};
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 type AuthState = "loading" | "signedOut" | "needsBusiness" | "ready";
 

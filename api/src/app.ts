@@ -27,8 +27,15 @@ app.post("/api/v1/razorpay/webhook", express.raw({ type: "application/json" }), 
 app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
-app.get("/razorpay-test", (_req, res) => res.type("html").send(razorpayTestPageHtml));
-app.use("/api/v1/razorpay-test", razorpayTestRouter);
+
+// Razorpay Standard Checkout connectivity test — deliberately unauthenticated for
+// low-friction manual testing, so it must not exist at all in production, not just be
+// hidden. Routes aren't registered outside development rather than gated behind a
+// runtime check, so there's no code path that could accidentally expose them.
+if (process.env.NODE_ENV !== "production") {
+  app.get("/razorpay-test", (_req, res) => res.type("html").send(razorpayTestPageHtml));
+  app.use("/api/v1/razorpay-test", razorpayTestRouter);
+}
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/businesses", businessesRouter);

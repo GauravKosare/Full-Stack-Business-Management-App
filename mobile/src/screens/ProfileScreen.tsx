@@ -1,6 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 
 interface Props {
   onSwitchBusiness: () => void;
@@ -10,7 +11,7 @@ interface Props {
 // Notifications on mobile is reached from here rather than a dedicated bottom tab,
 // per the UI/UX doc §2 (five tabs max: Home, Tasks, Team, Billing, Profile).
 export default function ProfileScreen({ onSwitchBusiness, onSignOut }: Props) {
-  const navigation = useNavigation<NativeStackNavigationProp<Record<string, undefined>>>();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   return (
     <View className="flex-1 gap-2 bg-gray-50 p-6">

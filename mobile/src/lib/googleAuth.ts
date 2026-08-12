@@ -12,13 +12,18 @@ export type GoogleSignInResult =
 
 // Mirrors the web app's auth flow exactly (see TRD §3 / api/src/routes/auth.ts):
 // open a browser to our server's /auth/google?platform=mobile, receive a one-time
-// code via the myapp:// deep link, exchange it for the JWT. The server — not this
-// app — is the actual OAuth client Google talks to; that's why this works with a
-// "Web application" Google Cloud OAuth client type even though the caller is a
-// native app.
+// code via a deep link, exchange it for the JWT. The server — not this app — is the
+// actual OAuth client Google talks to; that's why this works with a "Web application"
+// Google Cloud OAuth client type even though the caller is a native app.
+//
+// redirectUri is passed to the server explicitly (not assumed from its own
+// MOBILE_AUTH_REDIRECT_URL env var) because Linking.createURL() doesn't return the
+// app's real "myapp://" scheme under Expo Go — Expo Go can't register a third-party
+// scheme, so it returns a session-specific "exp://<lan-ip>:<port>/--/auth" URL instead.
+// Without this, openAuthSessionAsync would wait for a redirect the server never sends.
 export async function signInWithGoogle(): Promise<GoogleSignInResult> {
   const redirectUri = Linking.createURL("auth");
-  const authUrl = `${API_URL}/api/v1/auth/google?platform=mobile`;
+  const authUrl = `${API_URL}/api/v1/auth/google?platform=mobile&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
 
