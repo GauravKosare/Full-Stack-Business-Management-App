@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
 import { Router } from "express";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { passport, isGoogleAuthConfigured } from "../lib/passport";
 import { signAuthToken } from "../lib/jwt";
 import { createOneTimeCode, consumeOneTimeCode } from "../lib/oauthCodes";
+import { prisma } from "../lib/prisma";
 import type { User } from "@prisma/client";
 
 export const authRouter = Router();
@@ -140,4 +143,76 @@ authRouter.post("/exchange", (req, res) => {
 
 authRouter.get("/failure", (_req, res) => {
   res.status(401).json({ error: { code: "auth_failed", message: "Google sign-in failed" } });
+});
+
+const signupSchema = z.object({
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+});
+
+// POST /api/v1/auth/signup — email/password account creation.
+// Also "claims" an existing email-only placeholder row created by a business invite
+// (see routes/members.ts) — same behavior as the Google flow linking to a placeholder.
+authRouter.post("/signup", async (req, res) => {
+  const parsed = signupSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
+  }
+
+  const { name, email, password } = parsed.data;
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing?.passwordHash || existing?.googleId) {
+    // A real account (either auth method) already owns this email — don't let a signup
+    // silently overwrite it. (An email-only invite placeholder, with neither, is fine
+    // to claim below.)
+    return res.status(409).json({ error: { code: "conflict", message: "An account with this email already exists" } });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const user = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data: { name, passwordHash } })
+    : await prisma.user.create({ data: { email, name, passwordHash } });
+
+  // Mark any pending invites for this user as joined, same as the Google flow.
+  await prisma.businessMember.updateMany({
+    where: { userId: user.id, joinedAt: null },
+    data: { joinedAt: new Date() },
+  });
+
+  res.status(201).json({ token: signAuthToken({ userId: user.id }) });
+});
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+// POST /api/v1/auth/login — email/password sign-in.
+authRouter.post("/login", async (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
+  }
+
+  const { email, password } = parsed.data;
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  // Same response whether the email doesn't exist or the password is wrong — never
+  // reveal which one it was (standard practice, avoids account enumeration).
+  const invalidCredentials = () =>
+    res.status(401).json({ error: { code: "invalid_credentials", message: "Invalid email or password" } });
+
+  if (!user?.passwordHash) {
+    return invalidCredentials();
+  }
+
+  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatches) {
+    return invalidCredentials();
+  }
+
+  res.json({ token: signAuthToken({ userId: user.id }) });
 });

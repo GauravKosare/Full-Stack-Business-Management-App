@@ -32,6 +32,13 @@ if (googleClientId && googleClientSecret) {
           googleId: profile.id,
           name: profile.displayName,
           avatarUrl: profile.photos?.[0]?.value,
+          // If this email previously signed up with a password (unverified — we don't
+          // send verification emails yet), invalidate that password now that Google has
+          // actually verified ownership of the address. Otherwise anyone who registered
+          // this email/password first (before the real owner ever used it) could keep
+          // logging in as this account indefinitely after the real owner starts using
+          // Google — Google verification should be the stronger, superseding signal.
+          passwordHash: null,
         };
 
         // A user may already exist as an email-only placeholder created by an invite
