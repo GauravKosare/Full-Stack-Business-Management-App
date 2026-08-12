@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../lib/notifications";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -55,6 +56,8 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
       role: parsed.data.role,
     },
   });
+
+  await createNotification(invitedUser.id, businessId, "invite", { businessId, role: parsed.data.role });
 
   res.status(201).json(membership);
 });

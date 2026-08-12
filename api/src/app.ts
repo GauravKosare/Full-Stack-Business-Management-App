@@ -9,6 +9,8 @@ import { businessesRouter } from "./routes/businesses";
 import { membersRouter } from "./routes/members";
 import { tasksRouter } from "./routes/tasks";
 import { billingRouter, razorpayWebhookHandler } from "./routes/billing";
+import { performanceRouter, performanceReviewsRouter } from "./routes/performance";
+import { notificationsRouter } from "./routes/notifications";
 import { razorpayTestRouter } from "./routes/razorpayTest";
 import { razorpayTestPageHtml } from "./publicPages/razorpayTestPage";
 
@@ -33,5 +35,8 @@ app.use("/api/v1/businesses", businessesRouter);
 app.use("/api/v1/businesses/:businessId/members", membersRouter);
 app.use("/api/v1/businesses/:businessId/tasks", tasksRouter);
 app.use("/api/v1/businesses/:businessId/billing", billingRouter);
+app.use("/api/v1/businesses/:businessId/performance", performanceRouter);
+app.use("/api/v1/businesses/:businessId/performance-reviews", performanceReviewsRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 export default app;

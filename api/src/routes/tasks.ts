@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../lib/notifications";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -40,6 +41,12 @@ tasksRouter.post("/", requireRole("owner", "manager"), async (req: Request, res:
     },
     include: { assignments: true },
   });
+
+  await Promise.all(
+    parsed.data.assigneeIds.map((userId) =>
+      createNotification(userId, businessId, "task_assigned", { taskId: task.id, title: task.title })
+    )
+  );
 
   res.status(201).json(task);
 });

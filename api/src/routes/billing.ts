@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import crypto from "node:crypto";
 import { Plan, SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { createNotification } from "../lib/notifications";
 import { getRazorpay, isRazorpayConfigured } from "../lib/razorpay";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -140,6 +141,11 @@ export async function razorpayWebhookHandler(req: Request, res: Response) {
           },
         });
       }
+
+      await createNotification(business.ownerId, business.id, "billing_event", {
+        subscriptionStatus: status,
+        plan,
+      });
       break;
     }
     default:
