@@ -23,7 +23,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       setToken(token);
-      router.replace("/select-business");
+      router.replace("/select-business?welcome=login");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Log in failed");
     } finally {

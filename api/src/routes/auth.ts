@@ -6,6 +6,7 @@ import { passport, isGoogleAuthConfigured } from "../lib/passport";
 import { signAuthToken } from "../lib/jwt";
 import { createOneTimeCode, consumeOneTimeCode } from "../lib/oauthCodes";
 import { prisma } from "../lib/prisma";
+import { logger } from "../lib/logger";
 import type { User } from "@prisma/client";
 
 export const authRouter = Router();
@@ -119,7 +120,19 @@ authRouter.get(
         ? `${process.env.WEB_APP_URL ?? "http://localhost:3001"}/auth/callback`
         : (mobileRedirectUri ?? process.env.MOBILE_AUTH_REDIRECT_URL ?? "myapp://auth");
 
-    const redirectUrl = new URL(redirectBase);
+    // WEB_APP_URL is free-form server config (unlike MOBILE_AUTH_REDIRECT_URL, which is
+    // validated against isAllowedMobileRedirectUri) — a missing "https://" scheme makes
+    // `new URL()` throw synchronously, which would otherwise surface as an opaque 500
+    // with no indication of what's misconfigured.
+    let redirectUrl: URL;
+    try {
+      redirectUrl = new URL(redirectBase);
+    } catch {
+      logger.error({ redirectBase, platform }, "OAuth redirect target is not a valid URL — check WEB_APP_URL/MOBILE_AUTH_REDIRECT_URL");
+      return res
+        .status(500)
+        .json({ error: { code: "misconfigured", message: "Server redirect target is misconfigured" } });
+    }
     redirectUrl.searchParams.set("code", code);
     res.redirect(redirectUrl.toString());
   }

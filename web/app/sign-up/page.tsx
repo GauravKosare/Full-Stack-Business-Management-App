@@ -24,7 +24,7 @@ export default function SignUpPage() {
         body: JSON.stringify({ name, email, password }),
       });
       setToken(token);
-      router.replace("/select-business");
+      router.replace("/select-business?welcome=signup");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Sign up failed");
     } finally {

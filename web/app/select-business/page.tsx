@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { setActiveBusiness } from "@/lib/business";
@@ -12,12 +12,29 @@ interface Business {
   role: string;
 }
 
+const WELCOME_MESSAGES: Record<string, string> = {
+  signup: "Congratulations, and welcome! Your sign-up is complete.",
+  login: "You've successfully logged in.",
+};
+
 export default function SelectBusinessPage() {
+  return (
+    <Suspense fallback={<p className="p-8 text-gray-500">Loading…</p>}>
+      <SelectBusinessContent />
+    </Suspense>
+  );
+}
+
+function SelectBusinessContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [newName, setNewName] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [welcome, setWelcome] = useState<string | null>(
+    () => WELCOME_MESSAGES[searchParams.get("welcome") ?? ""] ?? null
+  );
 
   useEffect(() => {
     if (!getToken()) {
@@ -28,6 +45,12 @@ export default function SelectBusinessPage() {
       .then(setBusinesses)
       .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!welcome) return;
+    const timer = setTimeout(() => setWelcome(null), 5000);
+    return () => clearTimeout(timer);
+  }, [welcome]);
 
   function selectBusiness(business: Business) {
     setActiveBusiness(business.id, business.role);
@@ -53,6 +76,11 @@ export default function SelectBusinessPage() {
 
   return (
     <div className="mx-auto max-w-md p-8">
+      {welcome && (
+        <div className="mb-4 rounded-card border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
+          {welcome}
+        </div>
+      )}
       <h1 className="mb-4 text-lg font-semibold text-gray-900">Select a business</h1>
       <ul className="mb-6 divide-y divide-gray-200 rounded-card border border-gray-200 bg-white">
         {businesses.map((b) => (
