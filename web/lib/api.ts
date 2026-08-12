@@ -1,6 +1,10 @@
 import { getToken } from "./auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+// Falls back to the real deployed API rather than localhost — Vercel builds don't have
+// NEXT_PUBLIC_API_URL set (no way to configure that from here; it's a dashboard-only
+// setting), and a localhost fallback baked into a production build is useless to a real
+// browser. Local dev overrides this via .env.local (see .env.local.example).
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "https://full-stack-business-management-app.vercel.app";
 
 export class ApiError extends Error {
   status: number;
