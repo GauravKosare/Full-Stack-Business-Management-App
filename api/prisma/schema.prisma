@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  manager
+  employee
+  client
+}
+
+enum Plan {
+  free
+  pro
+  enterprise
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  incomplete
+}
+
+enum InvoiceStatus {
+  draft
+  open
+  paid
+  void
+  uncollectible
+}
+
+enum TaskStatus {
+  open
+  in_progress
+  done
+  canceled
+}
+
+enum TaskPriority {
+  low
+  medium
+  high
+}
+
+enum NotificationType {
+  task_assigned
+  task_due
+  billing_event
+  invite
+}
+
+model User {
+  id         String   @id @default(uuid())
+  googleId   String?  @unique @map("google_id")
+  email      String   @unique
+  name       String
+  avatarUrl  String?  @map("avatar_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  ownedBusinesses     Business[]           @relation("BusinessOwner")
+  memberships         BusinessMember[]
+  createdTasks        Task[]               @relation("TaskCreator")
+  taskAssignments     TaskAssignment[]
+  reviewsReceived     PerformanceReview[]  @relation("ReviewEmployee")
+  reviewsGiven        PerformanceReview[]  @relation("ReviewReviewer")
+  notifications       Notification[]
+
+  @@map("users")
+}
+
+model Business {
+  id                String   @id @default(uuid())
+  name              String
+  ownerId           String   @map("owner_id")
+  owner             User     @relation("BusinessOwner", fields: [ownerId], references: [id])
+  stripeCustomerId  String?  @unique @map("stripe_customer_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  members             BusinessMember[]
+  subscription        Subscription?
+  invoices             Invoice[]
+  tasks                Task[]
+  performanceReviews   PerformanceReview[]
+  notifications        Notification[]
+
+  @@map("businesses")
+}
+
+model BusinessMember {
+  id          String    @id @default(uuid())
+  businessId  String    @map("business_id")
+  business    Business  @relation(fields: [businessId], references: [id])
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id])
+  role        Role
+  invitedAt   DateTime  @default(now()) @map("invited_at")
+  joinedAt    DateTime? @map("joined_at")
+
+  @@unique([businessId, userId])
+  @@map("business_members")
+}
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  businessId            String             @unique @map("business_id")
+  business              Business           @relation(fields: [businessId], references: [id])
+  stripeSubscriptionId  String             @unique @map("stripe_subscription_id")
+  plan                  Plan
+  status                SubscriptionStatus
+  currentPeriodEnd      DateTime           @map("current_period_end")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id               String        @id @default(uuid())
+  businessId       String        @map("business_id")
+  business         Business      @relation(fields: [businessId], references: [id])
+  stripeInvoiceId  String        @unique @map("stripe_invoice_id")
+  amountDue        Int           @map("amount_due")
+  status           InvoiceStatus
+  issuedAt         DateTime      @map("issued_at")
+  pdfUrl           String?       @map("pdf_url")
+
+  @@map("invoices")
+}
+
+model Task {
+  id               String       @id @default(uuid())
+  businessId       String       @map("business_id")
+  business         Business     @relation(fields: [businessId], references: [id])
+  title            String
+  description      String?
+  status           TaskStatus   @default(open)
+  priority         TaskPriority @default(medium)
+  dueAt            DateTime?    @map("due_at")
+  recurrenceRule   String?      @map("recurrence_rule")
+  createdBy        String       @map("created_by")
+  creator          User         @relation("TaskCreator", fields: [createdBy], references: [id])
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  deletedAt        DateTime?    @map("deleted_at")
+
+  assignments TaskAssignment[]
+
+  @@index([businessId, status])
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id           String    @id @default(uuid())
+  taskId       String    @map("task_id")
+  task         Task      @relation(fields: [taskId], references: [id])
+  userId       String    @map("user_id")
+  user         User      @relation(fields: [userId], references: [id])
+  assignedAt   DateTime  @default(now()) @map("assigned_at")
+  completedAt  DateTime? @map("completed_at")
+
+  @@unique([taskId, userId])
+  @@map("task_assignments")
+}
+
+model PerformanceReview {
+  id                   String   @id @default(uuid())
+  businessId           String   @map("business_id")
+  business             Business @relation(fields: [businessId], references: [id])
+  employeeId           String   @map("employee_id")
+  employee             User     @relation("ReviewEmployee", fields: [employeeId], references: [id])
+  reviewerId           String   @map("reviewer_id")
+  reviewer             User     @relation("ReviewReviewer", fields: [reviewerId], references: [id])
+  periodStart          DateTime @map("period_start") @db.Date
+  periodEnd            DateTime @map("period_end") @db.Date
+  rating               Int
+  notes                String?
+  taskCompletionRate   Decimal  @map("task_completion_rate") @db.Decimal(5, 2)
+  onTimeRate           Decimal  @map("on_time_rate") @db.Decimal(5, 2)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@map("performance_reviews")
+}
+
+model Notification {
+  id          String            @id @default(uuid())
+  userId      String            @map("user_id")
+  user        User              @relation(fields: [userId], references: [id])
+  businessId  String            @map("business_id")
+  business    Business          @relation(fields: [businessId], references: [id])
+  type        NotificationType
+  payload     Json
+  readAt      DateTime?         @map("read_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
