@@ -4,6 +4,9 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import { logger } from "./lib/logger";
+import { isGoogleAuthConfigured } from "./lib/passport";
+import { isBrevoConfigured } from "./lib/brevo";
+import { isRazorpayConfigured } from "./lib/razorpay";
 import { authRouter } from "./routes/auth";
 import { businessesRouter } from "./routes/businesses";
 import { membersRouter } from "./routes/members";
@@ -26,7 +29,19 @@ app.post("/api/v1/razorpay/webhook", express.raw({ type: "application/json" }), 
 
 app.use(express.json());
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+// Booleans only, never secret values — safe to leave public, useful for confirming an
+// env var actually landed on the deployment that's currently serving traffic.
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    configured: {
+      google: isGoogleAuthConfigured,
+      brevo: isBrevoConfigured,
+      razorpay: isRazorpayConfigured,
+      webAppUrl: Boolean(process.env.WEB_APP_URL),
+    },
+  })
+);
 
 // Razorpay Standard Checkout connectivity test — deliberately unauthenticated for
 // low-friction manual testing, so it must not exist at all in production, not just be
