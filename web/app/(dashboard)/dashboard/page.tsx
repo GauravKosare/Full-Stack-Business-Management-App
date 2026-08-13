@@ -133,21 +133,23 @@ export default function DashboardPage() {
   }, [tasks, members]);
   const maxWorkload = Math.max(1, ...workload.map((w) => w.open));
 
-  const leaderboard = useMemo(() => {
-    const counts = new Map<string, { name: string; completed: number }>();
-    for (const m of members) counts.set(m.user.id, { name: m.user.name, completed: 0 });
+  // Each point: how many tasks someone was allocated (x) vs. how many they completed
+  // (y) — same underlying data as the workload chart above, already scoped to the
+  // viewer's subordinates by the task-visibility rules, just plotted per-person instead
+  // of as a bar.
+  const completionScatter = useMemo(() => {
+    const counts = new Map<string, { name: string; allocated: number; completed: number }>();
+    for (const m of members) counts.set(m.user.id, { name: m.user.name, allocated: 0, completed: 0 });
     for (const t of tasks) {
-      if (t.status !== "done") continue;
       for (const a of t.assignments) {
-        if (!a.completedAt) continue;
-        const entry = counts.get(a.userId) ?? { name: a.user.name, completed: 0 };
-        entry.completed += 1;
+        const entry = counts.get(a.userId) ?? { name: a.user.name, allocated: 0, completed: 0 };
+        entry.allocated += 1;
+        if (t.status === "done" && a.completedAt) entry.completed += 1;
         counts.set(a.userId, entry);
       }
     }
-    return [...counts.values()].sort((a, b) => b.completed - a.completed).slice(0, 8);
+    return [...counts.values()].filter((p) => p.allocated > 0);
   }, [tasks, members]);
-  const maxLeaderboard = Math.max(1, ...leaderboard.map((l) => l.completed));
 
   if (loading) return <p className="text-gray-500">Loading…</p>;
   if (error && total === 0) return <ErrorState message={error} />;
@@ -246,27 +248,10 @@ export default function DashboardPage() {
         {isElevated && (
           <div className="rounded-card border border-gray-200 bg-white p-5 lg:col-span-2">
             <h2 className="mb-1 text-sm font-semibold text-gray-700">Who's completing the most — and who isn't</h2>
-            <p className="mb-4 text-xs text-gray-400">Completed tasks, all time, among people you manage</p>
-            <div className="flex flex-col gap-3">
-              {leaderboard.map((l, i) => (
-                <div key={l.name} title={`${l.name}: ${l.completed} completed`}>
-                  <div className="mb-1 flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-medium text-gray-700">
-                      {i === 0 && l.completed > 0 && <span title="Top completer">🏆</span>}
-                      {l.name}
-                    </span>
-                    <span className={l.completed === 0 ? "text-warning" : "text-gray-400"}>{l.completed}</span>
-                  </div>
-                  <div className="h-2 rounded-pill bg-gray-100">
-                    <div
-                      className={`h-2 rounded-pill transition-all ${l.completed === 0 ? "bg-warning" : "bg-success"}`}
-                      style={{ width: `${Math.max((l.completed / maxLeaderboard) * 100, l.completed === 0 ? 4 : 0)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-              {leaderboard.length === 0 && <p className="text-center text-sm text-gray-400">No team members yet</p>}
-            </div>
+            <p className="mb-4 text-xs text-gray-400">
+              Each dot is a person you manage — tasks allocated to them vs. tasks they completed
+            </p>
+            <CompletionScatterPlot data={completionScatter} />
           </div>
         )}
       </div>
@@ -280,5 +265,103 @@ function StatTile({ label, value, tone }: { label: string; value: string | numbe
       <p className="text-xs uppercase text-gray-400">{label}</p>
       <p className={`mt-1 text-2xl font-semibold ${tone === "warning" ? "text-warning" : "text-gray-900"}`}>{value}</p>
     </div>
+  );
+}
+
+interface ScatterPoint {
+  name: string;
+  allocated: number;
+  completed: number;
+}
+
+// x = tasks allocated, y = tasks completed, one dot per person. The dashed diagonal is a
+// 100%-completion reference line — a dot sitting on it has finished everything it was
+// given; the further below, the more is still outstanding.
+function CompletionScatterPlot({ data }: { data: ScatterPoint[] }) {
+  if (data.length === 0) {
+    return <p className="py-8 text-center text-sm text-gray-400">No team members yet</p>;
+  }
+
+  const width = 520;
+  const height = 260;
+  const padL = 44;
+  const padR = 16;
+  const padT = 12;
+  const padB = 36;
+  const chartW = width - padL - padR;
+  const chartH = height - padT - padB;
+
+  const maxAllocated = Math.max(1, ...data.map((p) => p.allocated));
+  const maxCompleted = Math.max(1, ...data.map((p) => p.completed));
+  const maxAxis = Math.max(maxAllocated, maxCompleted);
+
+  const x = (v: number) => padL + (v / maxAxis) * chartW;
+  const y = (v: number) => padT + chartH - (v / maxAxis) * chartH;
+
+  const ticks = [...new Set([0, Math.round(maxAxis / 2), maxAxis])];
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="Tasks allocated vs. completed, per person">
+      {/* gridlines */}
+      {ticks.map((t) => (
+        <line key={`h${t}`} x1={padL} x2={width - padR} y1={y(t)} y2={y(t)} stroke="#E4E2DB" strokeWidth="1" />
+      ))}
+      {ticks.map((t) => (
+        <line key={`v${t}`} x1={x(t)} x2={x(t)} y1={padT} y2={height - padB} stroke="#E4E2DB" strokeWidth="1" />
+      ))}
+
+      {/* 100% completion reference line */}
+      <line x1={x(0)} y1={y(0)} x2={x(maxAxis)} y2={y(maxAxis)} stroke="#CFCDC3" strokeWidth="1.5" strokeDasharray="4 4" />
+
+      {/* axes */}
+      <line x1={padL} y1={padT} x2={padL} y2={height - padB} stroke="#8C8979" strokeWidth="1.5" />
+      <line x1={padL} y1={height - padB} x2={width - padR} y2={height - padB} stroke="#8C8979" strokeWidth="1.5" />
+
+      {ticks.map((t) => (
+        <text key={`xt${t}`} x={x(t)} y={height - padB + 16} fontSize="10" textAnchor="middle" fill="#6B6858">
+          {t}
+        </text>
+      ))}
+      {ticks.map((t) => (
+        <text key={`yt${t}`} x={padL - 8} y={y(t) + 3} fontSize="10" textAnchor="end" fill="#6B6858">
+          {t}
+        </text>
+      ))}
+
+      <text x={(padL + width - padR) / 2} y={height - 4} fontSize="11" textAnchor="middle" fill="#4A483F">
+        Tasks allocated
+      </text>
+      <text
+        x={12}
+        y={(padT + height - padB) / 2}
+        fontSize="11"
+        textAnchor="middle"
+        fill="#4A483F"
+        transform={`rotate(-90 12 ${(padT + height - padB) / 2})`}
+      >
+        Tasks completed
+      </text>
+
+      {data.map((p) => {
+        const behind = p.allocated - p.completed;
+        return (
+          <circle
+            key={p.name}
+            cx={x(p.allocated)}
+            cy={y(p.completed)}
+            r={6}
+            fill={behind === 0 ? "#3F5C40" : "#C1531C"}
+            fillOpacity={0.85}
+            stroke="#fff"
+            strokeWidth="1.5"
+          >
+            <title>
+              {p.name}: {p.completed} completed of {p.allocated} allocated
+              {behind > 0 ? ` (${behind} outstanding)` : ""}
+            </title>
+          </circle>
+        );
+      })}
+    </svg>
   );
 }

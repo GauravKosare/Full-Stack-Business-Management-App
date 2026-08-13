@@ -29,6 +29,37 @@ function businessInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
 
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function pad2(n: number) {
+  return n.toString().padStart(2, "0");
+}
+
+function HeaderClock() {
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!now) return null;
+
+  const date = `${pad2(now.getDate())}.${pad2(now.getMonth() + 1)}.${now.getFullYear()}`;
+  const time = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+
+  return (
+    <div className="flex items-baseline gap-2 text-sm text-gray-600">
+      <span className="font-semibold text-gray-900">{WEEKDAYS[now.getDay()]}</span>
+      <span className="text-gray-300">·</span>
+      <span className="tabular-nums">{time}</span>
+      <span className="text-gray-300">·</span>
+      <span className="tabular-nums">{date}</span>
+    </div>
+  );
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -112,17 +143,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           collapsed ? "w-[72px]" : "w-60"
         }`}
       >
-        <div className={`flex items-center gap-2 px-3 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>
-          {!collapsed && <NotificationBell />}
+        {/* Same box model as the nav links below (p-3 wrapper, px-3 py-2.5 flex item,
+            18px icon) so the icon sits in exactly the same column when collapsed. */}
+        <div className="p-3">
           <button
             onClick={toggleCollapsed}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-700 hover:bg-gray-300"
+            className={`flex w-full items-center gap-3 rounded-card px-3 py-2.5 text-gray-700 hover:bg-gray-300/60 ${
+              collapsed ? "justify-center" : ""
+            }`}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <CollapseIcon className="h-4 w-4" collapsed={collapsed} />
+            <CollapseIcon className="h-[18px] w-[18px] shrink-0" collapsed={collapsed} />
+            {!collapsed && <span className="text-sm font-medium">Collapse</span>}
           </button>
-          {collapsed && <NotificationBell />}
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 p-3">
@@ -162,22 +196,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-end border-b border-gray-200 bg-gray-50 px-8 py-3">
-          <button
-            onClick={() => router.push("/select-business")}
-            className="flex items-center gap-2.5 rounded-card px-2 py-1.5 hover:bg-gray-200"
-            title="Switch business"
-          >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
-              {business ? businessInitial(business.name) : "…"}
-            </span>
-            <span className="text-left">
-              <span className="block text-sm font-semibold leading-tight text-gray-900">
-                {business?.name ?? "Loading…"}
+        <header className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-8 py-3">
+          <HeaderClock />
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <button
+              onClick={() => router.push("/select-business")}
+              className="flex items-center gap-2.5 rounded-card px-2 py-1.5 hover:bg-gray-200"
+              title="Switch business"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                {business ? businessInitial(business.name) : "…"}
               </span>
-              <span className="block text-[11px] leading-tight text-gray-500">{ROLE_LABELS[role] ?? role}</span>
-            </span>
-          </button>
+              <span className="text-left">
+                <span className="block text-sm font-semibold leading-tight text-gray-900">
+                  {business?.name ?? "Loading…"}
+                </span>
+                <span className="block text-[11px] leading-tight text-gray-500">{ROLE_LABELS[role] ?? role}</span>
+              </span>
+            </button>
+          </div>
         </header>
         <main className="flex-1 overflow-y-auto bg-gray-50 p-8">{children}</main>
       </div>
