@@ -61,13 +61,21 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
 
   await createNotification(invitedUser.id, businessId, "invite", { businessId, role: parsed.data.role });
 
-  sendInviteEmail({
-    toEmail: invitedUser.email,
-    toName: invitedUser.name,
-    businessName: business.name,
-    role: parsed.data.role,
-    joinUrl: `${process.env.WEB_APP_URL ?? "http://localhost:3001"}/sign-in`,
-  }).catch((err) => logger.error({ err, email: invitedUser.email }, "Failed to send invite email"));
+  // Must be awaited, not fire-and-forget — Vercel's serverless runtime can freeze the
+  // function the instant the response is sent, killing any in-flight promise that isn't
+  // awaited first. A failed send still shouldn't fail the invite itself, so errors are
+  // caught and logged rather than propagated.
+  try {
+    await sendInviteEmail({
+      toEmail: invitedUser.email,
+      toName: invitedUser.name,
+      businessName: business.name,
+      role: parsed.data.role,
+      joinUrl: `${process.env.WEB_APP_URL ?? "http://localhost:3001"}/sign-in`,
+    });
+  } catch (err) {
+    logger.error({ err, email: invitedUser.email }, "Failed to send invite email");
+  }
 
   res.status(201).json(membership);
 });
