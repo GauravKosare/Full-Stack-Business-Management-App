@@ -2,7 +2,7 @@
 
 A full-stack, multi-tenant business management platform: role-based team hierarchies, task delegation with proof-of-completion uploads, company/department/DM chat with realtime delivery, performance reviews, and subscription billing. Built as a production web app (Next.js) and companion mobile app (Expo/React Native) sharing one Express + PostgreSQL API.
 
-**🔗 Live demo: [full-stack-business-management-app.vercel.app](https://full-stack-business-management-app.vercel.app)**
+**🔗 Live demo: [full-stack-business-management-app.vercel.app](https://full-stack-business-management-web.vercel.app)**
 
 📄 [Product description](docs/PRODUCT.md) · 🧰 [Tech stack](docs/TECH_STACK.md) · 🔄 [Workflow](docs/WORKFLOW.md)
 
