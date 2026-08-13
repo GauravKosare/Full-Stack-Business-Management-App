@@ -16,19 +16,21 @@ export function AuthMark({ className }: { className?: string }) {
 
 export default function AuthBrandPanel() {
   return (
-    <div className="hidden flex-1 flex-col justify-between bg-primary p-12 text-white md:flex">
+    <div className="hidden flex-1 flex-col bg-primary p-12 text-white md:flex">
       <div className="flex items-center gap-3">
         <AuthMark className="bg-white/15" />
         <span className="text-lg font-semibold">Business Management App</span>
       </div>
-      <div className="max-w-sm">
-        <p className="text-2xl leading-snug" style={{ textWrap: "balance" as const }}>
-          Tasks, teams, and chat — organized around who's actually responsible for what.
-        </p>
-        <p className="mt-4 text-sm text-white/70">
-          Assign work down your reporting line, see it move in real time, and keep every
-          department's conversation in one place.
-        </p>
+      <div className="flex flex-1 items-center">
+        <div className="max-w-md">
+          <p className="text-[29px] leading-snug" style={{ textWrap: "balance" as const }}>
+            Tasks, teams, and chat — organized around who's actually responsible for what.
+          </p>
+          <p className="mt-4 text-[18px] leading-relaxed text-white/70">
+            Assign work down your reporting line, see it move in real time, and keep every
+            department's conversation in one place.
+          </p>
+        </div>
       </div>
       <p className="text-xs text-white/50">© {new Date().getFullYear()} Business Management App</p>
     </div>
