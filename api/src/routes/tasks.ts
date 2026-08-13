@@ -55,7 +55,10 @@ tasksRouter.post("/", requireRole("owner", "manager"), async (req: Request, res:
   res.status(201).json(task);
 });
 
-// GET /api/v1/businesses/:businessId/tasks — any member; employees see only their own by default
+// GET /api/v1/businesses/:businessId/tasks — a task is only visible to whoever created
+// it and whoever it's assigned to (its "associated people"), not the whole business.
+// The business owner is the one exception — kept for overall oversight (dashboard,
+// workload view) rather than leaving the account owner blind to their own business.
 tasksRouter.get("/", async (req: Request, res: Response) => {
   const businessId = req.params.businessId as string;
 
@@ -67,12 +70,14 @@ tasksRouter.get("/", async (req: Request, res: Response) => {
     return res.status(403).json({ error: { code: "forbidden", message: "Not a member of this business" } });
   }
 
-  const isElevated = membership.role === "owner" || membership.role === "manager";
+  const seesEverything = membership.role === "owner";
   const tasks = await prisma.task.findMany({
     where: {
       businessId,
       deletedAt: null,
-      ...(isElevated ? {} : { assignments: { some: { userId: req.userId! } } }),
+      ...(seesEverything
+        ? {}
+        : { OR: [{ createdBy: req.userId! }, { assignments: { some: { userId: req.userId! } } }] }),
     },
     include: taskInclude,
     orderBy: { createdAt: "desc" },
@@ -85,7 +90,9 @@ const updateStatusSchema = z.object({
   status: z.enum(["open", "in_progress", "done", "canceled"]),
 });
 
-// PATCH /api/v1/businesses/:businessId/tasks/:taskId/status — assignee or Owner/Manager
+// PATCH /api/v1/businesses/:businessId/tasks/:taskId/status — assignee only. Deliberately
+// not open to owner/manager: moving a task on the board reflects the assignee's own
+// progress, and only they should be able to report it.
 tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
   const parsed = updateStatusSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -95,17 +102,11 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
   const businessId = req.params.businessId as string;
   const taskId = req.params.taskId as string;
 
-  const [membership, assignment] = await Promise.all([
-    prisma.businessMember.findUnique({
-      where: { businessId_userId: { businessId, userId: req.userId! } },
-    }),
-    prisma.taskAssignment.findUnique({
-      where: { taskId_userId: { taskId, userId: req.userId! } },
-    }),
-  ]);
+  const assignment = await prisma.taskAssignment.findUnique({
+    where: { taskId_userId: { taskId, userId: req.userId! } },
+  });
 
-  const isElevated = membership?.role === "owner" || membership?.role === "manager";
-  if (!isElevated && !assignment) {
+  if (!assignment) {
     return res.status(403).json({ error: { code: "forbidden", message: "Not assigned to this task" } });
   }
 
@@ -120,16 +121,26 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
     return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
   }
 
-  if (parsed.data.status === "done" && assignment) {
+  const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+
+  if (parsed.data.status === "done") {
     await prisma.taskAssignment.update({
       where: { taskId_userId: { taskId, userId: req.userId! } },
       data: { completedAt: new Date() },
     });
+
+    const onTime = !task.dueAt || new Date() <= task.dueAt;
+    await createNotification(task.createdBy, businessId, "task_completed", {
+      taskId,
+      title: task.title,
+      onTime,
+      completedBy: req.userId!,
+    });
   }
 
-  const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId }, include: taskInclude });
+  const enriched = await prisma.task.findUniqueOrThrow({ where: { id: taskId }, include: taskInclude });
 
-  res.json(task);
+  res.json(enriched);
 });
 
 const updateTaskSchema = z.object({
@@ -140,9 +151,10 @@ const updateTaskSchema = z.object({
   assigneeIds: z.array(z.string().uuid()).optional(),
 });
 
-// PATCH /api/v1/businesses/:businessId/tasks/:taskId — Owner/Manager only. Edits task
-// fields and/or fully replaces the assignee set (reassignment).
-tasksRouter.patch("/:taskId", requireRole("owner", "manager"), async (req: Request, res: Response) => {
+// PATCH /api/v1/businesses/:businessId/tasks/:taskId — the task's own creator, or the
+// business owner, not any manager — editing/reassigning is an authoring action tied to
+// who made the task, matching the same "associated people" rule as visibility above.
+tasksRouter.patch("/:taskId", async (req: Request, res: Response) => {
   const parsed = updateTaskSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
@@ -155,6 +167,14 @@ tasksRouter.patch("/:taskId", requireRole("owner", "manager"), async (req: Reque
   const existing = await prisma.task.findFirst({ where: { id: taskId, businessId } });
   if (!existing) {
     return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
+  }
+
+  const membership = await prisma.businessMember.findUnique({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+  const canEdit = existing.createdBy === req.userId! || membership?.role === "owner";
+  if (!canEdit) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Only the task's creator or the business owner can edit it" } });
   }
 
   const previousAssigneeIds = new Set(

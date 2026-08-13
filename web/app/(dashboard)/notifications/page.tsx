@@ -12,6 +12,23 @@ interface Notification {
   createdAt: string;
 }
 
+function describeNotification(n: Notification): string {
+  switch (n.type) {
+    case "invite":
+      return `You were invited as ${n.payload.role ?? "a member"}`;
+    case "task_assigned":
+      return `Assigned to "${n.payload.title ?? "a task"}"`;
+    case "task_completed":
+      return `"${n.payload.title ?? "A task"}" was completed ${n.payload.onTime ? "on time" : "after its deadline"}`;
+    case "task_due":
+      return `Task due soon: "${n.payload.title ?? ""}"`;
+    case "billing_event":
+      return "Billing update";
+    default:
+      return n.type.replace(/_/g, " ");
+  }
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +65,7 @@ export default function NotificationsPage() {
               className={`flex items-center justify-between px-4 py-3 text-sm ${n.readAt ? "" : "bg-blue-50/50"}`}
             >
               <div>
-                <p className="font-medium capitalize text-gray-900">{n.type.replace(/_/g, " ")}</p>
+                <p className="font-medium text-gray-900">{describeNotification(n)}</p>
                 <p className="text-xs text-gray-500">{new Date(n.createdAt).toLocaleString()}</p>
               </div>
               {!n.readAt && (

@@ -54,6 +54,7 @@ enum NotificationType {
   task_due
   billing_event
   invite
+  task_completed
 }
 
 model User {

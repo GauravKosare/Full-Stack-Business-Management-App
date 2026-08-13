@@ -33,7 +33,12 @@ interface Task {
   status: "open" | "in_progress" | "done" | "canceled";
   priority: "low" | "medium" | "high";
   dueAt: string | null;
+  createdBy: string;
   assignments: Assignment[];
+}
+
+interface Me {
+  id: string;
 }
 
 const COLUMNS: { status: Task["status"]; label: string }[] = [
@@ -60,6 +65,7 @@ function initials(name: string) {
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -70,10 +76,19 @@ export default function TasksPage() {
   const role = getActiveBusinessRole();
   const isElevated = role === "owner" || role === "manager";
 
+  function isAssignee(task: Task) {
+    return me !== null && task.assignments.some((a) => a.userId === me.id);
+  }
+
+  function canEditTask(task: Task) {
+    return me !== null && (task.createdBy === me.id || role === "owner");
+  }
+
   function load() {
     if (!businessId) return;
     const requests: Promise<unknown>[] = [
       apiFetch<Task[]>(`/api/v1/businesses/${businessId}/tasks`).then(setTasks),
+      apiFetch<Me>("/api/v1/auth/me").then(setMe),
     ];
     if (isElevated) {
       requests.push(apiFetch<Member[]>(`/api/v1/businesses/${businessId}/members`).then(setMembers));
@@ -106,7 +121,7 @@ export default function TasksPage() {
     setDragOverStatus(null);
     const taskId = e.dataTransfer.getData("text/plain");
     const task = tasks.find((t) => t.id === taskId);
-    if (task && task.status !== status) updateStatus(taskId, status);
+    if (task && task.status !== status && isAssignee(task)) updateStatus(taskId, status);
   }
 
   const workload = useMemo(() => {
@@ -171,14 +186,22 @@ export default function TasksPage() {
                   <span className="text-xs text-gray-400">{colTasks.length}</span>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {colTasks.map((task) => (
+                  {colTasks.map((task) => {
+                    const draggableByMe = isAssignee(task);
+                    const editableByMe = canEditTask(task);
+                    return (
                     <div
                       key={task.id}
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData("text/plain", task.id)}
-                      onClick={() => isElevated && setEditingTask(task)}
+                      draggable={draggableByMe}
+                      onDragStart={(e) => draggableByMe && e.dataTransfer.setData("text/plain", task.id)}
+                      onClick={() => editableByMe && setEditingTask(task)}
+                      title={
+                        !draggableByMe && !editableByMe
+                          ? "You're not assigned to or the creator of this task"
+                          : undefined
+                      }
                       className={`rounded-card border border-gray-200 bg-white p-3 shadow-sm ${
-                        isElevated ? "cursor-pointer hover:border-primary" : "cursor-grab"
+                        editableByMe ? "cursor-pointer hover:border-primary" : draggableByMe ? "cursor-grab" : ""
                       }`}
                     >
                       <p className="text-sm font-medium text-gray-900">{task.title}</p>
@@ -204,7 +227,8 @@ export default function TasksPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                   {colTasks.length === 0 && <p className="px-1 py-4 text-center text-xs text-gray-400">No tasks</p>}
                 </div>
               </div>

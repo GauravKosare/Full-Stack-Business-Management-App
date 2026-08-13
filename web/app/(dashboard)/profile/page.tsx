@@ -44,6 +44,8 @@ function describeNotification(n: NotificationItem): string {
       return `You were invited as ${n.payload.role ?? "a member"}`;
     case "task_assigned":
       return `Assigned to "${n.payload.title ?? "a task"}"`;
+    case "task_completed":
+      return `"${n.payload.title ?? "A task"}" was completed ${n.payload.onTime ? "on time" : "after its deadline"}`;
     case "task_due":
       return `Task due: "${n.payload.title ?? ""}"`;
     case "billing_event":
