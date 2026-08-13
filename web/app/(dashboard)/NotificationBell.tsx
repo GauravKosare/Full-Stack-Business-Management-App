@@ -5,6 +5,15 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { getActiveBusinessId } from "@/lib/business";
 
+function BellIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className={className}>
+      <path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z" strokeLinejoin="round" />
+      <path d="M9.7 18.5a2.3 2.3 0 0 0 4.6 0" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 interface Notification {
   id: string;
   type: string;
@@ -133,7 +142,7 @@ export default function NotificationBell() {
         className="relative flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50"
         aria-label="Notifications"
       >
-        <span aria-hidden>🔔</span>
+        <BellIcon className="h-4 w-4" />
         {unreadCount > 0 && (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-pill bg-danger px-1 text-[10px] font-medium text-white">
             {unreadCount > 9 ? "9+" : unreadCount}

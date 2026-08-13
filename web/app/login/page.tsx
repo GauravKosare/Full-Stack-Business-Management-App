@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch, ApiError, API_URL } from "@/lib/api";
 import { setToken } from "@/lib/auth";
+import AuthBrandPanel, { AuthMark } from "../AuthBrandPanel";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,8 +33,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+    <div className="flex min-h-screen">
+      <AuthBrandPanel />
+      <div className="flex flex-1 items-center justify-center bg-gray-50 p-6">
       <div className="w-full max-w-sm rounded-card border border-gray-200 bg-white p-8 shadow-sm">
+        <AuthMark className="mx-auto mb-4 md:hidden" />
         <h1 className="mb-2 text-xl font-semibold text-gray-900">Log in</h1>
         <p className="mb-6 text-sm text-gray-500">Welcome back</p>
 
@@ -83,6 +87,7 @@ export default function LoginPage() {
             Sign up
           </Link>
         </p>
+      </div>
       </div>
     </div>
   );

@@ -3,29 +3,38 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 import { getToken, clearToken } from "@/lib/auth";
 import { getActiveBusinessId, getActiveBusinessRole, clearActiveBusiness } from "@/lib/business";
-import { STAFF_MANAGING_ROLES } from "@/lib/roles";
+import { STAFF_MANAGING_ROLES, ROLE_LABELS } from "@/lib/roles";
 import NotificationBell from "./NotificationBell";
+import { DashboardIcon, TasksIcon, ChatIcon, TeamIcon, BillingIcon, ProfileIcon, CollapseIcon } from "./icons";
 
 const VALID_ROLES = ["owner", "director", "manager", "project_head", "employee"];
 const ALL_ROLES = VALID_ROLES;
+const SIDEBAR_COLLAPSED_KEY = "bma_sidebar_collapsed";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", roles: ALL_ROLES },
-  { href: "/tasks", label: "Tasks", roles: ALL_ROLES },
-  { href: "/chat", label: "Chat", roles: ALL_ROLES },
-  { href: "/team", label: "Team", roles: STAFF_MANAGING_ROLES },
-  { href: "/billing", label: "Billing", roles: ["owner"] },
-  { href: "/profile", label: "Profile", roles: ALL_ROLES },
+  { href: "/dashboard", label: "Dashboard", roles: ALL_ROLES, Icon: DashboardIcon },
+  { href: "/tasks", label: "Tasks", roles: ALL_ROLES, Icon: TasksIcon },
+  { href: "/chat", label: "Chat", roles: ALL_ROLES, Icon: ChatIcon },
+  { href: "/team", label: "Team", roles: STAFF_MANAGING_ROLES, Icon: TeamIcon },
+  { href: "/billing", label: "Billing", roles: ["owner"], Icon: BillingIcon },
+  { href: "/profile", label: "Profile", roles: ALL_ROLES, Icon: ProfileIcon },
 ];
 
 type LayoutState = { status: "loading" } | { status: "ready"; role: string } | { status: "error"; message: string };
+
+function businessInitial(name: string) {
+  return name.trim().charAt(0).toUpperCase() || "?";
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [state, setState] = useState<LayoutState>({ status: "loading" });
+  const [business, setBusiness] = useState<{ name: string } | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -47,7 +56,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return;
     }
     setState({ status: "ready", role });
+    apiFetch<{ name: string }>(`/api/v1/businesses/${businessId}`)
+      .then(setBusiness)
+      .catch(() => {});
+    setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
   }, [router]);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   function signOut() {
     clearToken();
@@ -86,39 +107,80 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
+      <aside
+        className={`flex shrink-0 flex-col bg-gray-200 transition-[width] duration-150 ${
+          collapsed ? "w-[72px]" : "w-60"
+        }`}
+      >
+        <div className={`flex items-center gap-2 px-3 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>
+          {!collapsed && <NotificationBell />}
           <button
-            onClick={() => router.push("/select-business")}
-            className="text-sm font-medium text-gray-900 hover:text-primary"
+            onClick={toggleCollapsed}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-700 hover:bg-gray-300"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            Switch business
+            <CollapseIcon className="h-4 w-4" collapsed={collapsed} />
           </button>
-          <NotificationBell />
+          {collapsed && <NotificationBell />}
         </div>
+
         <nav className="flex flex-1 flex-col gap-1 p-3">
-          {visibleItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`rounded-card px-3 py-2 text-sm font-medium ${
-                pathname === item.href ? "bg-blue-50 text-primary" : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {visibleItems.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                className={`flex items-center gap-3 rounded-card px-3 py-2.5 text-sm font-medium ${
+                  collapsed ? "justify-center" : ""
+                } ${active ? "bg-blue-50 text-primary" : "text-gray-700 hover:bg-gray-300/60"}`}
+              >
+                <item.Icon className="h-[18px] w-[18px] shrink-0" />
+                {!collapsed && <span className="truncate">{item.label}</span>}
+              </Link>
+            );
+          })}
         </nav>
-        <div className="border-t border-gray-200 p-3">
+
+        <div className="p-3">
           <button
             onClick={signOut}
-            className="w-full rounded-card px-3 py-2 text-left text-sm text-gray-500 hover:bg-gray-50"
+            title={collapsed ? "Sign out" : undefined}
+            className={`flex w-full items-center gap-3 rounded-card px-3 py-2.5 text-left text-sm text-gray-600 hover:bg-gray-300/60 ${
+              collapsed ? "justify-center" : ""
+            }`}
           >
-            Sign out
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[18px] w-[18px] shrink-0">
+              <path d="M15 4h-2.5A2.5 2.5 0 0 0 10 6.5v11A2.5 2.5 0 0 0 12.5 20H15" strokeLinecap="round" />
+              <path d="M18.5 12h-9m0 0 3-3m-3 3 3 3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {!collapsed && "Sign out"}
           </button>
         </div>
       </aside>
-      <main className="flex-1 bg-gray-50 p-8">{children}</main>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-end border-b border-gray-200 bg-gray-50 px-8 py-3">
+          <button
+            onClick={() => router.push("/select-business")}
+            className="flex items-center gap-2.5 rounded-card px-2 py-1.5 hover:bg-gray-200"
+            title="Switch business"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+              {business ? businessInitial(business.name) : "…"}
+            </span>
+            <span className="text-left">
+              <span className="block text-sm font-semibold leading-tight text-gray-900">
+                {business?.name ?? "Loading…"}
+              </span>
+              <span className="block text-[11px] leading-tight text-gray-500">{ROLE_LABELS[role] ?? role}</span>
+            </span>
+          </button>
+        </header>
+        <main className="flex-1 overflow-y-auto bg-gray-50 p-8">{children}</main>
+      </div>
     </div>
   );
 }

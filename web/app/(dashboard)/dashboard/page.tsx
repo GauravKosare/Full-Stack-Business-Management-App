@@ -34,6 +34,10 @@ const STATUS_META: { status: Task["status"]; label: string; barClass: string; do
 
 const POLL_INTERVAL_MS = 15000;
 
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -43,6 +47,11 @@ export default function DashboardPage() {
 
   const businessId = getActiveBusinessId();
   const role = getActiveBusinessRole();
+  // Deeper analytics (workload, leaderboard, day-over-day trend) are for anyone who
+  // manages people below them — Owner, Director ("department head"), Manager, Project
+  // Head — not Employee. The underlying task data itself is already scoped to each
+  // viewer's subordinates by the API (see api/src/routes/tasks.ts), so nothing extra is
+  // needed here to keep the analytics limited to "roles below them."
   const isElevated = isStaffManaging(role);
 
   useEffect(() => {
@@ -91,6 +100,24 @@ export default function DashboardPage() {
   const completionRate = total > 0 ? Math.round((done / total) * 100) : 0;
   const maxStatusCount = Math.max(1, ...STATUS_META.map((s) => statusCounts.get(s.status) ?? 0));
 
+  const { completedToday, completedYesterday } = useMemo(() => {
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    let today = 0;
+    let prior = 0;
+    for (const t of tasks) {
+      for (const a of t.assignments) {
+        if (!a.completedAt) continue;
+        const completed = new Date(a.completedAt);
+        if (isSameDay(completed, now)) today += 1;
+        else if (isSameDay(completed, yesterday)) prior += 1;
+      }
+    }
+    return { completedToday: today, completedYesterday: prior };
+  }, [tasks]);
+  const growth = completedToday - completedYesterday;
+
   const workload = useMemo(() => {
     const counts = new Map<string, { name: string; open: number }>();
     for (const m of members) counts.set(m.user.id, { name: m.user.name, open: 0 });
@@ -105,6 +132,22 @@ export default function DashboardPage() {
     return [...counts.values()].sort((a, b) => b.open - a.open).slice(0, 8);
   }, [tasks, members]);
   const maxWorkload = Math.max(1, ...workload.map((w) => w.open));
+
+  const leaderboard = useMemo(() => {
+    const counts = new Map<string, { name: string; completed: number }>();
+    for (const m of members) counts.set(m.user.id, { name: m.user.name, completed: 0 });
+    for (const t of tasks) {
+      if (t.status !== "done") continue;
+      for (const a of t.assignments) {
+        if (!a.completedAt) continue;
+        const entry = counts.get(a.userId) ?? { name: a.user.name, completed: 0 };
+        entry.completed += 1;
+        counts.set(a.userId, entry);
+      }
+    }
+    return [...counts.values()].sort((a, b) => b.completed - a.completed).slice(0, 8);
+  }, [tasks, members]);
+  const maxLeaderboard = Math.max(1, ...leaderboard.map((l) => l.completed));
 
   if (loading) return <p className="text-gray-500">Loading…</p>;
   if (error && total === 0) return <ErrorState message={error} />;
@@ -125,8 +168,25 @@ export default function DashboardPage() {
         <StatTile label="Total tasks" value={total} />
         <StatTile label="Completed" value={done} />
         <StatTile label="Completion rate" value={`${completionRate}%`} />
-        <StatTile label="Overdue" value={overdue} tone={overdue > 0 ? "danger" : undefined} />
+        <StatTile label="Overdue" value={overdue} tone={overdue > 0 ? "warning" : undefined} />
       </div>
+
+      {isElevated && (
+        <div className="mb-6 rounded-card border border-gray-200 bg-white p-5">
+          <p className="text-xs uppercase text-gray-400">Completed today vs. yesterday</p>
+          <div className="mt-1 flex items-baseline gap-3">
+            <span className="text-2xl font-semibold text-gray-900">{completedToday}</span>
+            <span
+              className={`flex items-center gap-1 text-sm font-medium ${
+                growth > 0 ? "text-success" : growth < 0 ? "text-warning" : "text-gray-400"
+              }`}
+              title={`${completedToday} completed today vs. ${completedYesterday} yesterday`}
+            >
+              {growth > 0 ? "▲" : growth < 0 ? "▼" : "—"} {growth === 0 ? "No change" : `${Math.abs(growth)} vs. yesterday`}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-card border border-gray-200 bg-white p-5">
@@ -182,16 +242,43 @@ export default function DashboardPage() {
             </p>
           </div>
         )}
+
+        {isElevated && (
+          <div className="rounded-card border border-gray-200 bg-white p-5 lg:col-span-2">
+            <h2 className="mb-1 text-sm font-semibold text-gray-700">Who's completing the most — and who isn't</h2>
+            <p className="mb-4 text-xs text-gray-400">Completed tasks, all time, among people you manage</p>
+            <div className="flex flex-col gap-3">
+              {leaderboard.map((l, i) => (
+                <div key={l.name} title={`${l.name}: ${l.completed} completed`}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-medium text-gray-700">
+                      {i === 0 && l.completed > 0 && <span title="Top completer">🏆</span>}
+                      {l.name}
+                    </span>
+                    <span className={l.completed === 0 ? "text-warning" : "text-gray-400"}>{l.completed}</span>
+                  </div>
+                  <div className="h-2 rounded-pill bg-gray-100">
+                    <div
+                      className={`h-2 rounded-pill transition-all ${l.completed === 0 ? "bg-warning" : "bg-success"}`}
+                      style={{ width: `${Math.max((l.completed / maxLeaderboard) * 100, l.completed === 0 ? 4 : 0)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {leaderboard.length === 0 && <p className="text-center text-sm text-gray-400">No team members yet</p>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function StatTile({ label, value, tone }: { label: string; value: string | number; tone?: "danger" }) {
+function StatTile({ label, value, tone }: { label: string; value: string | number; tone?: "warning" }) {
   return (
     <div className="rounded-card border border-gray-200 bg-white p-5">
       <p className="text-xs uppercase text-gray-400">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${tone === "danger" ? "text-danger" : "text-gray-900"}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-semibold ${tone === "warning" ? "text-warning" : "text-gray-900"}`}>{value}</p>
     </div>
   );
 }
