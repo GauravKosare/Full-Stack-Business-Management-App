@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
+import { STAFF_MANAGING_ROLES } from "../lib/roles";
 
 /**
  * Rates are computed live from task_assignments rather than via a scheduled nightly
@@ -53,7 +54,7 @@ performanceRouter.get("/:employeeId", async (req: Request, res: Response) => {
     return res.status(403).json({ error: { code: "forbidden", message: "Not a member of this business" } });
   }
 
-  const isElevated = membership.role === "owner" || membership.role === "manager";
+  const isElevated = STAFF_MANAGING_ROLES.includes(membership.role);
   if (!isElevated && req.userId !== employeeId) {
     return res
       .status(403)
@@ -75,9 +76,9 @@ const createReviewSchema = z.object({
   notes: z.string().max(5000).optional(),
 });
 
-// POST /api/v1/businesses/:businessId/performance-reviews — Owner/Manager only.
+// POST /api/v1/businesses/:businessId/performance-reviews — any staff-managing role.
 // Snapshots the current computed rates into the review at creation time.
-performanceReviewsRouter.post("/", requireRole("owner", "manager"), async (req: Request, res: Response) => {
+performanceReviewsRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, res: Response) => {
   const parsed = createReviewSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
@@ -121,7 +122,7 @@ performanceReviewsRouter.get("/", async (req: Request, res: Response) => {
     return res.status(403).json({ error: { code: "forbidden", message: "Not a member of this business" } });
   }
 
-  const isElevated = membership.role === "owner" || membership.role === "manager";
+  const isElevated = STAFF_MANAGING_ROLES.includes(membership.role);
   const requestedEmployeeId = req.query.employeeId as string | undefined;
 
   if (!isElevated && requestedEmployeeId && requestedEmployeeId !== req.userId) {

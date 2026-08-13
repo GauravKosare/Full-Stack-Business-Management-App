@@ -1,7 +1,9 @@
 import { Request, Response, Router } from "express";
 import { z } from "zod";
+import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
+import { STAFF_MANAGING_ROLES, outranks } from "../lib/roles";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -12,6 +14,32 @@ const taskInclude = {
   assignments: { include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
 } as const;
 
+// A task's assignees must each be strictly below the assigner's own rank — matching the
+// same delegation rule as invites (src/lib/roles.ts) — except assigning to yourself,
+// which is always allowed regardless of rank.
+async function invalidAssigneeReason(
+  businessId: string,
+  actorId: string,
+  actorRole: Role,
+  assigneeIds: string[]
+): Promise<string | null> {
+  const others = assigneeIds.filter((id) => id !== actorId);
+  if (others.length === 0) return null;
+
+  const memberships = await prisma.businessMember.findMany({
+    where: { businessId, userId: { in: others } },
+    select: { userId: true, role: true },
+  });
+
+  for (const id of others) {
+    const membership = memberships.find((m) => m.userId === id);
+    if (!membership || !outranks(actorRole, membership.role)) {
+      return "You can only assign tasks to people ranked below you";
+    }
+  }
+  return null;
+}
+
 const createTaskSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().max(5000).optional(),
@@ -21,14 +49,23 @@ const createTaskSchema = z.object({
   assigneeIds: z.array(z.string().uuid()).default([]),
 });
 
-// POST /api/v1/businesses/:businessId/tasks — Owner/Manager only
-tasksRouter.post("/", requireRole("owner", "manager"), async (req: Request, res: Response) => {
+// POST /api/v1/businesses/:businessId/tasks — any staff-managing role (everyone but
+// Employee) may create tasks, but only for people they outrank (see invalidAssigneeReason).
+tasksRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, res: Response) => {
   const parsed = createTaskSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
   }
 
   const businessId = req.params.businessId as string;
+
+  const membership = await prisma.businessMember.findUniqueOrThrow({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+  const reason = await invalidAssigneeReason(businessId, req.userId!, membership.role, parsed.data.assigneeIds);
+  if (reason) {
+    return res.status(403).json({ error: { code: "forbidden", message: reason } });
+  }
 
   const task = await prisma.task.create({
     data: {
@@ -175,6 +212,13 @@ tasksRouter.patch("/:taskId", async (req: Request, res: Response) => {
   const canEdit = existing.createdBy === req.userId! || membership?.role === "owner";
   if (!canEdit) {
     return res.status(403).json({ error: { code: "forbidden", message: "Only the task's creator or the business owner can edit it" } });
+  }
+
+  if (assigneeIds !== undefined && membership) {
+    const reason = await invalidAssigneeReason(businessId, req.userId!, membership.role, assigneeIds);
+    if (reason) {
+      return res.status(403).json({ error: { code: "forbidden", message: reason } });
+    }
   }
 
   const previousAssigneeIds = new Set(

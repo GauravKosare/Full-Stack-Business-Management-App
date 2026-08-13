@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId, getActiveBusinessRole } from "@/lib/business";
+import { isStaffManaging } from "@/lib/roles";
 import { ErrorState } from "../ErrorState";
 
 interface Assignment {
@@ -42,7 +43,7 @@ export default function DashboardPage() {
 
   const businessId = getActiveBusinessId();
   const role = getActiveBusinessRole();
-  const isElevated = role === "owner" || role === "manager";
+  const isElevated = isStaffManaging(role);
 
   useEffect(() => {
     if (!businessId) return;

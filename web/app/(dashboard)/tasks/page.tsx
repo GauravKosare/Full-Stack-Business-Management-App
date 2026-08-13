@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, FormEvent } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId, getActiveBusinessRole } from "@/lib/business";
+import { isStaffManaging, outranks } from "@/lib/roles";
 import { ErrorState } from "../ErrorState";
 
 interface Member {
@@ -74,7 +75,11 @@ export default function TasksPage() {
 
   const businessId = getActiveBusinessId();
   const role = getActiveBusinessRole();
-  const isElevated = role === "owner" || role === "manager";
+  const isElevated = isStaffManaging(role);
+
+  // Only members the current user actually outranks (or themself) are valid assignees —
+  // matches the server-side rule in api/src/routes/tasks.ts's invalidAssigneeReason.
+  const assignableMembers = members.filter((m) => m.user.id === me?.id || outranks(role, m.role));
 
   function isAssignee(task: Task) {
     return me !== null && task.assignments.some((a) => a.userId === me.id);
@@ -262,7 +267,7 @@ export default function TasksPage() {
 
       {creating && (
         <TaskFormModal
-          members={members}
+          members={assignableMembers}
           onClose={() => setCreating(false)}
           onSubmit={async (data) => {
             if (!businessId) return;
@@ -278,7 +283,7 @@ export default function TasksPage() {
 
       {editingTask && (
         <TaskFormModal
-          members={members}
+          members={assignableMembers}
           initial={editingTask}
           onClose={() => setEditingTask(null)}
           onSubmit={async (data) => {

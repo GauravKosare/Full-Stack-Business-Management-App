@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
 import { sendInviteEmail } from "../lib/brevo";
 import { logger } from "../lib/logger";
+import { STAFF_MANAGING_ROLES, ROLE_LABELS, outranks } from "../lib/roles";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -13,11 +14,15 @@ membersRouter.use(requireAuth);
 const inviteSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(200).optional(),
-  role: z.enum(["manager", "employee", "client"]),
+  role: z.enum(["director", "manager", "project_head", "employee"]),
+  department: z.string().max(100).optional(),
 });
 
-// POST /api/v1/businesses/:businessId/members — invite a member (owner, or manager inviting employees only)
-membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
+// POST /api/v1/businesses/:businessId/members — invite (or re-invite, changing role/
+// department) a member. Every staff-managing role may invite, but only into a role
+// strictly below its own — enforced below, not by requireRole, since that only knows
+// the caller's own role, not the hierarchy relationship to the target role.
+membersRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) => {
   const parsed = inviteSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
@@ -32,8 +37,13 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
     prisma.business.findUniqueOrThrow({ where: { id: businessId } }),
   ]);
 
-  if (callerMembership!.role === "manager" && parsed.data.role !== "employee") {
-    return res.status(403).json({ error: { code: "forbidden", message: "Managers may only invite employees" } });
+  if (!outranks(callerMembership!.role, parsed.data.role)) {
+    return res.status(403).json({
+      error: {
+        code: "forbidden",
+        message: `${ROLE_LABELS[callerMembership!.role]}s may only invite roles below their own`,
+      },
+    });
   }
 
   // Placeholder user (no googleId yet) — linked on first Google sign-in by matching email.
@@ -47,15 +57,32 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
     return res.status(400).json({ error: { code: "bad_request", message: "Cannot change the business owner's role via invite" } });
   }
 
-  // update: role is set on every call, not just create — otherwise re-inviting an
-  // existing member with a different role silently no-ops and the role never changes.
+  // Re-inviting an existing member doubles as "edit their role" — so the caller must
+  // also outrank the member's *current* role, not just the requested new one. Without
+  // this, a Manager could "re-invite" a Director down to Employee, since outranking the
+  // requested target role (employee) alone isn't the same as being allowed to touch a
+  // Director at all.
+  const existingMembership = await prisma.businessMember.findUnique({
+    where: { businessId_userId: { businessId, userId: invitedUser.id } },
+  });
+  if (existingMembership && !outranks(callerMembership!.role, existingMembership.role)) {
+    return res.status(403).json({
+      error: { code: "forbidden", message: "You cannot change the role of someone at or above your own rank" },
+    });
+  }
+
+  // update: role/department are set on every call, not just create — otherwise
+  // re-inviting an existing member with a different role silently no-ops and the role
+  // never changes. This doubles as the "edit an existing member's role" mechanism —
+  // there's no separate endpoint for that.
   const membership = await prisma.businessMember.upsert({
     where: { businessId_userId: { businessId, userId: invitedUser.id } },
-    update: { role: parsed.data.role },
+    update: { role: parsed.data.role, department: parsed.data.department },
     create: {
       businessId,
       userId: invitedUser.id,
       role: parsed.data.role,
+      department: parsed.data.department,
     },
   });
 
@@ -81,7 +108,7 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
 });
 
 // GET /api/v1/businesses/:businessId/members
-membersRouter.get("/", requireRole("owner", "manager"), async (req, res) => {
+membersRouter.get("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) => {
   const members = await prisma.businessMember.findMany({
     where: { businessId: req.params.businessId as string },
     include: { user: true },

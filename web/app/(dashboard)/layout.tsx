@@ -5,16 +5,18 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { getToken, clearToken } from "@/lib/auth";
 import { getActiveBusinessId, getActiveBusinessRole, clearActiveBusiness } from "@/lib/business";
+import { STAFF_MANAGING_ROLES } from "@/lib/roles";
 
-const VALID_ROLES = ["owner", "manager", "employee", "client"];
+const VALID_ROLES = ["owner", "director", "manager", "project_head", "employee"];
+const ALL_ROLES = VALID_ROLES;
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", roles: ["owner", "manager", "employee"] },
-  { href: "/tasks", label: "Tasks", roles: ["owner", "manager", "employee"] },
-  { href: "/team", label: "Team", roles: ["owner", "manager"] },
-  { href: "/billing", label: "Billing", roles: ["owner", "manager"] },
-  { href: "/notifications", label: "Notifications", roles: ["owner", "manager", "employee"] },
-  { href: "/profile", label: "Profile", roles: ["owner", "manager", "employee", "client"] },
+  { href: "/dashboard", label: "Dashboard", roles: ALL_ROLES },
+  { href: "/tasks", label: "Tasks", roles: ALL_ROLES },
+  { href: "/team", label: "Team", roles: STAFF_MANAGING_ROLES },
+  { href: "/billing", label: "Billing", roles: ["owner"] },
+  { href: "/notifications", label: "Notifications", roles: ALL_ROLES },
+  { href: "/profile", label: "Profile", roles: ALL_ROLES },
 ];
 
 type LayoutState = { status: "loading" } | { status: "ready"; role: string } | { status: "error"; message: string };

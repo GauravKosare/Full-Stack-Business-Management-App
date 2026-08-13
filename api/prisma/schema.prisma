@@ -7,11 +7,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Ordered top to bottom: owner outranks director outranks manager outranks
+// project_head outranks employee. Rank comparisons live in src/lib/roles.ts, not here —
+// this enum only defines the valid set of values.
 enum Role {
   owner
+  director
   manager
+  project_head
   employee
-  client
 }
 
 enum Plan {
@@ -102,6 +106,9 @@ model BusinessMember {
   userId      String    @map("user_id")
   user        User      @relation(fields: [userId], references: [id])
   role        Role
+  // Free-text label, not a fixed enum — "Tech", "Marketing", etc. Purely descriptive,
+  // does not affect authorization; only the role/hierarchy does (see src/lib/roles.ts).
+  department  String?   @map("department")
   invitedAt   DateTime  @default(now()) @map("invited_at")
   joinedAt    DateTime? @map("joined_at")
 
