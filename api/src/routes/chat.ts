@@ -4,7 +4,9 @@ import { prisma } from "../lib/prisma";
 import { findOrCreateDirectChannel } from "../lib/channels";
 import { broadcastNewMessage } from "../lib/realtime";
 import { logger } from "../lib/logger";
+import { STAFF_MANAGING_ROLES, canAddToChannel } from "../lib/roles";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireRole } from "../middleware/requireRole";
 
 export const chatRouter = Router({ mergeParams: true });
 chatRouter.use(requireAuth);
@@ -46,10 +48,15 @@ chatRouter.get("/", async (req: Request, res: Response) => {
       return {
         id: m.channel.id,
         type: m.channel.type,
+        name: m.channel.name,
+        description: m.channel.description,
         department: m.channel.department,
-        // For a direct channel, "otherMembers" is the one other participant — the client
-        // uses this to render their name/avatar in place of a channel name.
-        otherMembers: m.channel.type === "direct" ? m.channel.members.map((cm) => cm.user) : [],
+        // For direct/custom channels, "otherMembers" is everyone else in it — the
+        // client uses this to render participant names in place of/alongside a name.
+        otherMembers:
+          m.channel.type === "direct" || m.channel.type === "custom"
+            ? m.channel.members.map((cm) => cm.user)
+            : [],
         lastMessage,
         unreadCount,
       };
@@ -57,6 +64,25 @@ chatRouter.get("/", async (req: Request, res: Response) => {
   );
 
   res.json(channels);
+});
+
+// GET /api/v1/businesses/:businessId/channels/assignable-members — who the caller could
+// add to a channel they create (see canAddToChannel: same rank, below, or one rank
+// above). Deliberately not filtered by the Team page's department-visibility rule —
+// channel membership is a rank question, not a department one.
+chatRouter.get("/assignable-members", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, res: Response) => {
+  const businessId = req.params.businessId as string;
+
+  const caller = await prisma.businessMember.findUniqueOrThrow({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+
+  const members = await prisma.businessMember.findMany({
+    where: { businessId, joinedAt: { not: null }, userId: { not: req.userId! } },
+    include: { user: userSummary },
+  });
+
+  res.json(members.filter((m) => canAddToChannel(caller.role, m.role)).map((m) => m.user));
 });
 
 const startDirectSchema = z.object({ userId: z.string().uuid() });
@@ -84,6 +110,64 @@ chatRouter.post("/direct", async (req: Request, res: Response) => {
   }
 
   const channel = await findOrCreateDirectChannel(businessId, req.userId!, parsed.data.userId);
+  res.status(201).json({ id: channel.id, type: channel.type });
+});
+
+const createChannelSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  department: z.string().max(100).optional(),
+  memberIds: z.array(z.string().uuid()).default([]),
+});
+
+// POST /api/v1/businesses/:businessId/channels — create a custom channel. Any
+// staff-managing role (everyone but Employee) can create one, but may only add people
+// at their own rank, below it, or exactly one rank above (see canAddToChannel) —
+// deliberately more permissive than invites/task assignment, which never allow adding
+// upward at all.
+chatRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, res: Response) => {
+  const parsed = createChannelSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
+  }
+
+  const businessId = req.params.businessId as string;
+
+  const creatorMembership = await prisma.businessMember.findUniqueOrThrow({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+
+  const memberIds = [...new Set(parsed.data.memberIds.filter((id) => id !== req.userId))];
+  if (memberIds.length > 0) {
+    const memberships = await prisma.businessMember.findMany({
+      where: { businessId, userId: { in: memberIds }, joinedAt: { not: null } },
+      select: { userId: true, role: true },
+    });
+    for (const id of memberIds) {
+      const membership = memberships.find((m) => m.userId === id);
+      if (!membership || !canAddToChannel(creatorMembership.role, membership.role)) {
+        return res.status(403).json({
+          error: {
+            code: "forbidden",
+            message: "You can only add people at your rank, below it, or one rank above",
+          },
+        });
+      }
+    }
+  }
+
+  const channel = await prisma.channel.create({
+    data: {
+      businessId,
+      type: "custom",
+      name: parsed.data.name,
+      description: parsed.data.description,
+      department: parsed.data.department,
+      createdBy: req.userId!,
+      members: { create: [{ userId: req.userId! }, ...memberIds.map((userId) => ({ userId }))] },
+    },
+  });
+
   res.status(201).json({ id: channel.id, type: channel.type });
 });
 

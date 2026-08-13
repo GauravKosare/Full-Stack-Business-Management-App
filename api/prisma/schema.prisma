@@ -65,6 +65,10 @@ enum ChannelType {
   direct
   department
   company
+  // Manually created by a staff-managing role, with an explicit member list — unlike
+  // department/company, membership here is NOT auto-derived and never changes on its
+  // own (see src/lib/channels.ts).
+  custom
 }
 
 model User {
@@ -228,9 +232,15 @@ model Channel {
   type       ChannelType
   // Only meaningful for "department" channels — the department name this channel is
   // scoped to. Null for "company" (there's exactly one) and "direct" (named from its
-  // two participants instead, computed client-side, not stored).
+  // two participants instead, computed client-side, not stored). A "custom" channel MAY
+  // also set this, purely as a display label — it does not drive membership there.
   department String?
-  createdAt  DateTime    @default(now()) @map("created_at")
+  // "custom" channels only — direct/department/company are named/described by their
+  // type instead (see the "department" comment above and the "direct" one on the field).
+  name        String?
+  description String?
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   members  ChannelMember[]
   messages Message[]

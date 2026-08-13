@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, FormEvent } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { getActiveBusinessId } from "@/lib/business";
+import { getActiveBusinessId, getActiveBusinessRole } from "@/lib/business";
+import { isStaffManaging } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { ErrorState } from "../ErrorState";
 
@@ -24,7 +25,9 @@ interface Message {
 
 interface ChannelSummary {
   id: string;
-  type: "direct" | "department" | "company";
+  type: "direct" | "department" | "company" | "custom";
+  name: string | null;
+  description: string | null;
   department: string | null;
   otherMembers: UserSummary[];
   lastMessage: Message | null;
@@ -40,6 +43,7 @@ function initials(name: string) {
 function channelLabel(c: ChannelSummary): string {
   if (c.type === "company") return "Company";
   if (c.type === "department") return c.department ?? "Department";
+  if (c.type === "custom") return c.name ?? "Channel";
   return c.otherMembers[0]?.name ?? "Direct message";
 }
 
@@ -53,7 +57,10 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [startingDm, setStartingDm] = useState(false);
+  const [creatingChannel, setCreatingChannel] = useState(false);
   const businessId = getActiveBusinessId();
+  const role = getActiveBusinessRole();
+  const canCreateChannel = isStaffManaging(role);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   function loadChannels() {
@@ -148,10 +155,22 @@ export default function ChatPage() {
     setActiveChannelId(channel.id);
   }
 
+  async function createChannel(data: { name: string; description?: string; department?: string; memberIds: string[] }) {
+    if (!businessId) return;
+    const channel = await apiFetch<{ id: string }>(`/api/v1/businesses/${businessId}/channels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    setCreatingChannel(false);
+    loadChannels();
+    setActiveChannelId(channel.id);
+  }
+
   const grouped = useMemo(() => {
     return {
       company: channels.filter((c) => c.type === "company"),
       department: channels.filter((c) => c.type === "department"),
+      custom: channels.filter((c) => c.type === "custom"),
       direct: channels.filter((c) => c.type === "direct"),
     };
   }, [channels]);
@@ -165,16 +184,32 @@ export default function ChatPage() {
       <aside className="w-64 shrink-0 overflow-y-auto rounded-card border border-gray-200 bg-white p-3">
         <div className="mb-2 flex items-center justify-between px-1">
           <h1 className="text-sm font-semibold text-gray-900">Chat</h1>
-          <button onClick={() => setStartingDm(true)} className="text-xs font-medium text-primary hover:underline">
-            + DM
-          </button>
+          <div className="flex gap-2">
+            {canCreateChannel && (
+              <button
+                onClick={() => setCreatingChannel(true)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                + Channel
+              </button>
+            )}
+            <button onClick={() => setStartingDm(true)} className="text-xs font-medium text-primary hover:underline">
+              + DM
+            </button>
+          </div>
         </div>
 
-        {(["company", "department", "direct"] as const).map((group) =>
+        {(["company", "department", "custom", "direct"] as const).map((group) =>
           grouped[group].length > 0 ? (
             <div key={group} className="mb-3">
               <p className="mb-1 px-1 text-xs font-medium uppercase text-gray-400">
-                {group === "company" ? "Company" : group === "department" ? "Department" : "Direct messages"}
+                {group === "company"
+                  ? "Company"
+                  : group === "department"
+                    ? "Department"
+                    : group === "custom"
+                      ? "Channels"
+                      : "Direct messages"}
               </p>
               {grouped[group].map((c) => (
                 <button
@@ -263,6 +298,14 @@ export default function ChatPage() {
       {startingDm && (
         <StartDmModal businessId={businessId} onClose={() => setStartingDm(false)} onPick={startDm} />
       )}
+
+      {creatingChannel && (
+        <CreateChannelModal
+          businessId={businessId}
+          onClose={() => setCreatingChannel(false)}
+          onCreate={createChannel}
+        />
+      )}
     </div>
   );
 }
@@ -323,6 +366,126 @@ function StartDmModal({
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function CreateChannelModal({
+  businessId,
+  onClose,
+  onCreate,
+}: {
+  businessId: string | null;
+  onClose: () => void;
+  onCreate: (data: { name: string; description?: string; department?: string; memberIds: string[] }) => Promise<void>;
+}) {
+  const [people, setPeople] = useState<UserSummary[]>([]);
+  const [loadingPeople, setLoadingPeople] = useState(true);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [department, setDepartment] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!businessId) return;
+    apiFetch<UserSummary[]>(`/api/v1/businesses/${businessId}/channels/assignable-members`)
+      .then(setPeople)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load people"))
+      .finally(() => setLoadingPeople(false));
+  }, [businessId]);
+
+  function toggleMember(userId: string) {
+    setMemberIds((ids) => (ids.includes(userId) ? ids.filter((id) => id !== userId) : [...ids, userId]));
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onCreate({
+        name,
+        description: description || undefined,
+        department: department || undefined,
+        memberIds,
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create channel");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-card border border-gray-200 bg-white p-6 shadow-lg"
+      >
+        <h2 className="mb-4 text-lg font-semibold text-gray-900">New channel</h2>
+
+        <div className="flex flex-col gap-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Channel name"
+            required
+            className="rounded-card border border-gray-300 px-3 py-2 text-sm"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description (optional)"
+            rows={2}
+            className="rounded-card border border-gray-300 px-3 py-2 text-sm"
+          />
+          <input
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            placeholder="Department label (optional)"
+            className="rounded-card border border-gray-300 px-3 py-2 text-sm"
+          />
+
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase text-gray-400">Add members</p>
+            {loadingPeople ? (
+              <p className="text-sm text-gray-500">Loading…</p>
+            ) : (
+              <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+                {people.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 rounded-card px-1 py-1 text-sm hover:bg-gray-50">
+                    <input type="checkbox" checked={memberIds.includes(p.id)} onChange={() => toggleMember(p.id)} />
+                    {p.name}
+                  </label>
+                ))}
+                {people.length === 0 && <p className="text-sm text-gray-400">No one eligible to add</p>}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-danger">{error}</p>}
+
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-card border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Creating…" : "Create"}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

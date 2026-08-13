@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { getActiveBusinessId } from "@/lib/business";
 import { ErrorState } from "../ErrorState";
 
 interface Notification {
@@ -35,7 +36,8 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
 
   function load() {
-    apiFetch<Notification[]>("/api/v1/notifications")
+    const businessId = getActiveBusinessId();
+    apiFetch<Notification[]>(`/api/v1/notifications?businessId=${businessId ?? ""}`)
       .then(setNotifications)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load notifications"))
       .finally(() => setLoading(false));

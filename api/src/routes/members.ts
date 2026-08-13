@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
 import { sendInviteEmail } from "../lib/brevo";
 import { logger } from "../lib/logger";
-import { STAFF_MANAGING_ROLES, ROLE_LABELS, outranks } from "../lib/roles";
+import { STAFF_MANAGING_ROLES, PEER_VISIBILITY_ROLES, ROLE_LABELS, outranks } from "../lib/roles";
 import { syncChannelMembership } from "../lib/channels";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
@@ -116,10 +116,32 @@ membersRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) =
   res.status(201).json(membership);
 });
 
-// GET /api/v1/businesses/:businessId/members
-membersRouter.get("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) => {
+// GET /api/v1/businesses/:businessId/members — Owner sees everyone. Everyone else
+// (Director/Manager/Project Head) sees: people in their own department (any rank), plus
+// — for Director/Manager, "manager and above" — same-rank peers company-wide regardless
+// of department. Matches the same associated-people philosophy as task visibility.
+membersRouter.get("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, res: Response) => {
+  const businessId = req.params.businessId as string;
+
+  const viewer = await prisma.businessMember.findUniqueOrThrow({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+
+  const seesEverything = viewer.role === "owner";
+
   const members = await prisma.businessMember.findMany({
-    where: { businessId: req.params.businessId as string },
+    where: {
+      businessId,
+      ...(seesEverything
+        ? {}
+        : {
+            OR: [
+              { userId: req.userId! },
+              ...(viewer.department ? [{ department: viewer.department }] : []),
+              ...(PEER_VISIBILITY_ROLES.includes(viewer.role) ? [{ role: viewer.role }] : []),
+            ],
+          }),
+    },
     include: { user: true },
   });
 

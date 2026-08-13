@@ -68,7 +68,11 @@ export default function ProfilePage() {
     if (businessId) {
       requests.push(apiFetch<Business>(`/api/v1/businesses/${businessId}`).then(setBusiness));
     }
-    requests.push(apiFetch<NotificationItem[]>("/api/v1/notifications").then((all) => setLogs(all.slice(0, 10))));
+    requests.push(
+      apiFetch<NotificationItem[]>(`/api/v1/notifications?businessId=${businessId ?? ""}`).then((all) =>
+        setLogs(all.slice(0, 10))
+      )
+    );
 
     Promise.all(requests)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load profile"))

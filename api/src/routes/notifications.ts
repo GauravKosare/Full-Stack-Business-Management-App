@@ -5,10 +5,15 @@ import { requireAuth } from "../middleware/requireAuth";
 export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth);
 
-// GET /api/v1/notifications — current user's notifications across all businesses, newest first
+// GET /api/v1/notifications?businessId=<id> — current user's notifications, newest
+// first. Scoped to one business when businessId is given (the normal case — the web/
+// mobile apps always have an active business selected); omitting it falls back to
+// every business the caller belongs to, for callers with no business context yet.
 notificationsRouter.get("/", async (req: Request, res: Response) => {
+  const businessId = typeof req.query.businessId === "string" ? req.query.businessId : undefined;
+
   const notifications = await prisma.notification.findMany({
-    where: { userId: req.userId! },
+    where: { userId: req.userId!, ...(businessId ? { businessId } : {}) },
     orderBy: { createdAt: "desc" },
     take: 50,
   });

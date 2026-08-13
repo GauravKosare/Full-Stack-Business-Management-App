@@ -26,6 +26,10 @@ export const INVITABLE_ROLES: Role[] = ["director", "manager", "project_head", "
 // Roles that may create tasks and manage the team at all (anyone but the bottom rank).
 export const STAFF_MANAGING_ROLES: Role[] = ["owner", "director", "manager", "project_head"];
 
+// "Manager and above" — these roles see same-rank peers company-wide on the Team page,
+// regardless of department, on top of the department-scoped visibility everyone gets.
+export const PEER_VISIBILITY_ROLES: Role[] = ["owner", "director", "manager"];
+
 export function outranks(actor: Role, target: Role): boolean {
   return ROLE_RANK[actor] < ROLE_RANK[target];
 }
@@ -33,4 +37,11 @@ export function outranks(actor: Role, target: Role): boolean {
 // What roles `actor` is allowed to invite/assign into — strictly below their own rank.
 export function assignableRolesFor(actor: Role): Role[] {
   return INVITABLE_ROLES.filter((role) => outranks(actor, role));
+}
+
+// Chat channel creation is more permissive than invites/task assignment: same rank,
+// anyone below, or exactly one rank above (e.g. a Manager can add a Director, but not
+// an Owner, to a channel they're creating).
+export function canAddToChannel(actor: Role, target: Role): boolean {
+  return ROLE_RANK[target] >= ROLE_RANK[actor] - 1;
 }
