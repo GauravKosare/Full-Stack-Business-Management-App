@@ -59,6 +59,7 @@ enum NotificationType {
   billing_event
   invite
   task_completed
+  channel_invite
 }
 
 enum ChannelType {

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { getToken, clearToken } from "@/lib/auth";
 import { getActiveBusinessId, getActiveBusinessRole, clearActiveBusiness } from "@/lib/business";
 import { STAFF_MANAGING_ROLES } from "@/lib/roles";
+import NotificationBell from "./NotificationBell";
 
 const VALID_ROLES = ["owner", "director", "manager", "project_head", "employee"];
 const ALL_ROLES = VALID_ROLES;
@@ -16,7 +17,6 @@ const NAV_ITEMS = [
   { href: "/chat", label: "Chat", roles: ALL_ROLES },
   { href: "/team", label: "Team", roles: STAFF_MANAGING_ROLES },
   { href: "/billing", label: "Billing", roles: ["owner"] },
-  { href: "/notifications", label: "Notifications", roles: ALL_ROLES },
   { href: "/profile", label: "Profile", roles: ALL_ROLES },
 ];
 
@@ -87,13 +87,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white">
-        <div className="border-b border-gray-200 px-4 py-4">
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
           <button
             onClick={() => router.push("/select-business")}
             className="text-sm font-medium text-gray-900 hover:text-primary"
           >
             Switch business
           </button>
+          <NotificationBell />
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
           {visibleItems.map((item) => (

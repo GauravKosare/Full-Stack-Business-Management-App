@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { findOrCreateDirectChannel } from "../lib/channels";
 import { broadcastNewMessage } from "../lib/realtime";
+import { createNotification } from "../lib/notifications";
 import { logger } from "../lib/logger";
 import { STAFF_MANAGING_ROLES, canAddToChannel } from "../lib/roles";
 import { requireAuth } from "../middleware/requireAuth";
@@ -167,6 +168,12 @@ chatRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request, 
       members: { create: [{ userId: req.userId! }, ...memberIds.map((userId) => ({ userId }))] },
     },
   });
+
+  await Promise.all(
+    memberIds.map((userId) =>
+      createNotification(userId, businessId, "channel_invite", { channelId: channel.id, channelName: channel.name })
+    )
+  );
 
   res.status(201).json({ id: channel.id, type: channel.type });
 });
