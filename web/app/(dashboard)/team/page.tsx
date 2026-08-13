@@ -18,6 +18,9 @@ export default function TeamPage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("employee");
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const businessId = getActiveBusinessId();
 
   function load() {
@@ -34,24 +37,35 @@ export default function TeamPage() {
   async function invite(e: FormEvent) {
     e.preventDefault();
     if (!email.trim() || !businessId) return;
-    await apiFetch(`/api/v1/businesses/${businessId}/members`, {
-      method: "POST",
-      body: JSON.stringify({ email, role }),
-    });
-    setEmail("");
-    load();
+    setInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+    try {
+      await apiFetch(`/api/v1/businesses/${businessId}/members`, {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      });
+      setInviteSuccess(`Invite sent to ${email}.`);
+      setEmail("");
+      load();
+    } catch (err) {
+      setInviteError(err instanceof ApiError ? err.message : "Failed to send invite");
+    } finally {
+      setInviting(false);
+    }
   }
 
   return (
     <div>
       <h1 className="mb-6 text-xl font-semibold text-gray-900">Team</h1>
 
-      <form onSubmit={invite} className="mb-6 flex gap-2">
+      <form onSubmit={invite} className="mb-2 flex gap-2">
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email to invite"
           type="email"
+          required
           className="flex-1 rounded-card border border-gray-300 px-3 py-2 text-sm"
         />
         <select
@@ -63,10 +77,16 @@ export default function TeamPage() {
           <option value="manager">Manager</option>
           <option value="client">Client</option>
         </select>
-        <button type="submit" className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-          Invite
+        <button
+          type="submit"
+          disabled={inviting}
+          className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {inviting ? "Inviting…" : "Invite"}
         </button>
       </form>
+      {inviteError && <p className="mb-4 text-sm text-danger">{inviteError}</p>}
+      {inviteSuccess && <p className="mb-4 text-sm text-success">{inviteSuccess}</p>}
 
       {loading ? (
         <p className="text-gray-500">Loading…</p>

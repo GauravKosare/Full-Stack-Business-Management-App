@@ -7,6 +7,7 @@ import { signAuthToken } from "../lib/jwt";
 import { createOneTimeCode, consumeOneTimeCode } from "../lib/oauthCodes";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middleware/requireAuth";
 import type { User } from "@prisma/client";
 
 export const authRouter = Router();
@@ -228,4 +229,18 @@ authRouter.post("/login", async (req, res) => {
   }
 
   res.json({ token: signAuthToken({ userId: user.id }) });
+});
+
+// GET /api/v1/auth/me — current user's own profile, for the profile page.
+authRouter.get("/me", requireAuth, async (req, res) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId! } });
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+    hasPassword: Boolean(user.passwordHash),
+    hasGoogle: Boolean(user.googleId),
+    createdAt: user.createdAt,
+  });
 });

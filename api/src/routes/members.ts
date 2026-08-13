@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
+import { sendInviteEmail } from "../lib/brevo";
+import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -58,6 +60,14 @@ membersRouter.post("/", requireRole("owner", "manager"), async (req, res) => {
   });
 
   await createNotification(invitedUser.id, businessId, "invite", { businessId, role: parsed.data.role });
+
+  sendInviteEmail({
+    toEmail: invitedUser.email,
+    toName: invitedUser.name,
+    businessName: business.name,
+    role: parsed.data.role,
+    joinUrl: `${process.env.WEB_APP_URL ?? "http://localhost:3001"}/sign-in`,
+  }).catch((err) => logger.error({ err, email: invitedUser.email }, "Failed to send invite email"));
 
   res.status(201).json(membership);
 });

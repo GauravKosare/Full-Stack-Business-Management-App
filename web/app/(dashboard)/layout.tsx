@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/team", label: "Team", roles: ["owner", "manager"] },
   { href: "/billing", label: "Billing", roles: ["owner", "manager"] },
   { href: "/notifications", label: "Notifications", roles: ["owner", "manager", "employee"] },
+  { href: "/profile", label: "Profile", roles: ["owner", "manager", "employee", "client"] },
 ];
 
 type LayoutState = { status: "loading" } | { status: "ready"; role: string } | { status: "error"; message: string };

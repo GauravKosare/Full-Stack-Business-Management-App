@@ -8,6 +8,10 @@ import { requireRole } from "../middleware/requireRole";
 export const tasksRouter = Router({ mergeParams: true });
 tasksRouter.use(requireAuth);
 
+const taskInclude = {
+  assignments: { include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
+} as const;
+
 const createTaskSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().max(5000).optional(),
@@ -39,7 +43,7 @@ tasksRouter.post("/", requireRole("owner", "manager"), async (req: Request, res:
         create: parsed.data.assigneeIds.map((userId) => ({ userId })),
       },
     },
-    include: { assignments: true },
+    include: taskInclude,
   });
 
   await Promise.all(
@@ -70,7 +74,7 @@ tasksRouter.get("/", async (req: Request, res: Response) => {
       deletedAt: null,
       ...(isElevated ? {} : { assignments: { some: { userId: req.userId! } } }),
     },
-    include: { assignments: true },
+    include: taskInclude,
     orderBy: { createdAt: "desc" },
   });
 
@@ -116,8 +120,6 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
     return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
   }
 
-  const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
-
   if (parsed.data.status === "done" && assignment) {
     await prisma.taskAssignment.update({
       where: { taskId_userId: { taskId, userId: req.userId! } },
@@ -125,5 +127,63 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
     });
   }
 
+  const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId }, include: taskInclude });
+
+  res.json(task);
+});
+
+const updateTaskSchema = z.object({
+  title: z.string().min(1).max(300).optional(),
+  description: z.string().max(5000).optional(),
+  dueAt: z.string().datetime().nullable().optional(),
+  priority: z.enum(["low", "medium", "high"]).optional(),
+  assigneeIds: z.array(z.string().uuid()).optional(),
+});
+
+// PATCH /api/v1/businesses/:businessId/tasks/:taskId — Owner/Manager only. Edits task
+// fields and/or fully replaces the assignee set (reassignment).
+tasksRouter.patch("/:taskId", requireRole("owner", "manager"), async (req: Request, res: Response) => {
+  const parsed = updateTaskSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
+  }
+
+  const businessId = req.params.businessId as string;
+  const taskId = req.params.taskId as string;
+  const { assigneeIds, dueAt, ...fields } = parsed.data;
+
+  const existing = await prisma.task.findFirst({ where: { id: taskId, businessId } });
+  if (!existing) {
+    return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
+  }
+
+  const previousAssigneeIds = new Set(
+    (await prisma.taskAssignment.findMany({ where: { taskId }, select: { userId: true } })).map((a) => a.userId)
+  );
+  const newlyAssignedIds = (assigneeIds ?? []).filter((id) => !previousAssigneeIds.has(id));
+
+  await prisma.$transaction([
+    prisma.task.update({
+      where: { id: taskId },
+      data: { ...fields, ...(dueAt !== undefined ? { dueAt: dueAt ? new Date(dueAt) : null } : {}) },
+    }),
+    // Reassignment replaces the whole assignee set rather than diffing in place —
+    // simpler and correct for this UI (a full picker, not incremental add/remove),
+    // at the cost of losing per-assignment completedAt history on reassignment.
+    ...(assigneeIds !== undefined
+      ? [
+          prisma.taskAssignment.deleteMany({ where: { taskId } }),
+          prisma.taskAssignment.createMany({ data: assigneeIds.map((userId) => ({ taskId, userId })) }),
+        ]
+      : []),
+  ]);
+
+  await Promise.all(
+    newlyAssignedIds.map((userId) =>
+      createNotification(userId, businessId, "task_assigned", { taskId, title: fields.title ?? existing.title })
+    )
+  );
+
+  const task = await prisma.task.findUniqueOrThrow({ where: { id: taskId }, include: taskInclude });
   res.json(task);
 });
