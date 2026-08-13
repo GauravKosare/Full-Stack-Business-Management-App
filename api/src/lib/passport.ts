@@ -3,6 +3,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
+import { syncAllChannelMembershipsForUser } from "./channels";
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -70,6 +71,7 @@ if (googleClientId && googleClientSecret) {
           where: { userId: user.id, joinedAt: null },
           data: { joinedAt: new Date() },
         });
+        await syncAllChannelMembershipsForUser(user.id);
 
         done(null, user);
       } catch (err) {

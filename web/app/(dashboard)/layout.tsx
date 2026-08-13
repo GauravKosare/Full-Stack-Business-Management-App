@@ -13,6 +13,7 @@ const ALL_ROLES = VALID_ROLES;
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", roles: ALL_ROLES },
   { href: "/tasks", label: "Tasks", roles: ALL_ROLES },
+  { href: "/chat", label: "Chat", roles: ALL_ROLES },
   { href: "/team", label: "Team", roles: STAFF_MANAGING_ROLES },
   { href: "/billing", label: "Billing", roles: ["owner"] },
   { href: "/notifications", label: "Notifications", roles: ALL_ROLES },

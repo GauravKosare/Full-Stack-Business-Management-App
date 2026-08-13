@@ -61,6 +61,12 @@ enum NotificationType {
   task_completed
 }
 
+enum ChannelType {
+  direct
+  department
+  company
+}
+
 model User {
   id           String   @id @default(uuid())
   googleId     String?  @unique @map("google_id")
@@ -78,6 +84,8 @@ model User {
   reviewsReceived     PerformanceReview[]  @relation("ReviewEmployee")
   reviewsGiven        PerformanceReview[]  @relation("ReviewReviewer")
   notifications       Notification[]
+  channelMemberships  ChannelMember[]
+  sentMessages        Message[]
 
   @@map("users")
 }
@@ -95,6 +103,7 @@ model Business {
   tasks                Task[]
   performanceReviews   PerformanceReview[]
   notifications        Notification[]
+  channels             Channel[]
 
   @@map("businesses")
 }
@@ -210,4 +219,50 @@ model Notification {
 
   @@index([userId, readAt])
   @@map("notifications")
+}
+
+model Channel {
+  id         String      @id @default(uuid())
+  businessId String      @map("business_id")
+  business   Business    @relation(fields: [businessId], references: [id])
+  type       ChannelType
+  // Only meaningful for "department" channels — the department name this channel is
+  // scoped to. Null for "company" (there's exactly one) and "direct" (named from its
+  // two participants instead, computed client-side, not stored).
+  department String?
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  members  ChannelMember[]
+  messages Message[]
+
+  // One company channel and one department channel per department name, per business.
+  // Multiple "direct" channels can share department=null, so direct channels are
+  // excluded from this constraint (see the partial unique index in the migration).
+  @@map("channels")
+}
+
+model ChannelMember {
+  id         String    @id @default(uuid())
+  channelId  String    @map("channel_id")
+  channel    Channel   @relation(fields: [channelId], references: [id])
+  userId     String    @map("user_id")
+  user       User      @relation(fields: [userId], references: [id])
+  joinedAt   DateTime  @default(now()) @map("joined_at")
+  lastReadAt DateTime? @map("last_read_at")
+
+  @@unique([channelId, userId])
+  @@map("channel_members")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  channelId String   @map("channel_id")
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  senderId  String   @map("sender_id")
+  sender    User     @relation(fields: [senderId], references: [id])
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([channelId, createdAt])
+  @@map("messages")
 }

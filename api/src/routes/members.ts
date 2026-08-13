@@ -1,10 +1,11 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
 import { sendInviteEmail } from "../lib/brevo";
 import { logger } from "../lib/logger";
 import { STAFF_MANAGING_ROLES, ROLE_LABELS, outranks } from "../lib/roles";
+import { syncChannelMembership } from "../lib/channels";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -86,6 +87,14 @@ membersRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) =
     },
   });
 
+  // Already-joined member being edited (not a fresh placeholder) — their channel
+  // membership needs to move immediately if their department just changed. A fresh
+  // placeholder has no channel membership yet; that's set up when they actually join
+  // (see syncAllChannelMembershipsForUser in auth.ts/passport.ts).
+  if (existingMembership?.joinedAt) {
+    await syncChannelMembership(businessId, invitedUser.id, parsed.data.department ?? null);
+  }
+
   await createNotification(invitedUser.id, businessId, "invite", { businessId, role: parsed.data.role });
 
   // Must be awaited, not fire-and-forget — Vercel's serverless runtime can freeze the
@@ -115,4 +124,25 @@ membersRouter.get("/", requireRole(...STAFF_MANAGING_ROLES), async (req, res) =>
   });
 
   res.json(members);
+});
+
+// GET /api/v1/businesses/:businessId/members/directory — any joined member (not just
+// staff-managing roles) can see who else is in the business, name/avatar only — used to
+// start a DM. Role/department stay behind the GET / above.
+membersRouter.get("/directory", async (req: Request, res: Response) => {
+  const businessId = req.params.businessId as string;
+
+  const membership = await prisma.businessMember.findUnique({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+  if (!membership?.joinedAt) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Not a member of this business" } });
+  }
+
+  const members = await prisma.businessMember.findMany({
+    where: { businessId, joinedAt: { not: null }, userId: { not: req.userId! } },
+    include: { user: { select: { id: true, name: true, avatarUrl: true } } },
+  });
+
+  res.json(members.map((m) => m.user));
 });

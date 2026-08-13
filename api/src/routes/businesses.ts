@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { syncChannelMembership } from "../lib/channels";
 import { requireAuth } from "../middleware/requireAuth";
 
 export const businessesRouter = Router();
@@ -26,6 +27,8 @@ businessesRouter.post("/", async (req, res) => {
       },
     },
   });
+
+  await syncChannelMembership(business.id, req.userId!, null);
 
   res.status(201).json(business);
 });

@@ -7,6 +7,7 @@ import { signAuthToken } from "../lib/jwt";
 import { createOneTimeCode, consumeOneTimeCode } from "../lib/oauthCodes";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
+import { syncAllChannelMembershipsForUser } from "../lib/channels";
 import { requireAuth } from "../middleware/requireAuth";
 import type { User } from "@prisma/client";
 
@@ -195,6 +196,7 @@ authRouter.post("/signup", async (req, res) => {
     where: { userId: user.id, joinedAt: null },
     data: { joinedAt: new Date() },
   });
+  await syncAllChannelMembershipsForUser(user.id);
 
   res.status(201).json({ token: signAuthToken({ userId: user.id }) });
 });
