@@ -8,6 +8,7 @@ import { isGoogleAuthConfigured } from "./lib/passport";
 import { isBrevoConfigured } from "./lib/brevo";
 import { isRazorpayConfigured } from "./lib/razorpay";
 import { isRealtimeConfigured } from "./lib/realtime";
+import { isStorageConfigured } from "./lib/storage";
 import { authRouter } from "./routes/auth";
 import { businessesRouter } from "./routes/businesses";
 import { membersRouter } from "./routes/members";
@@ -21,7 +22,10 @@ import { razorpayTestPageHtml } from "./publicPages/razorpayTestPage";
 
 const app = express();
 
-app.use(cors());
+// maxAge caches the browser's CORS preflight (OPTIONS) response for a day, so repeat
+// calls to the same endpoint+method within a session skip an extra network round-trip
+// entirely — a real, free latency win given web and api are on different origins.
+app.use(cors({ maxAge: 86400 }));
 app.use(cookieParser());
 app.use(pinoHttp({ logger }));
 
@@ -41,6 +45,7 @@ app.get("/health", (_req, res) =>
       brevo: isBrevoConfigured,
       razorpay: isRazorpayConfigured,
       realtime: isRealtimeConfigured,
+      storage: isStorageConfigured,
       webAppUrl: Boolean(process.env.WEB_APP_URL),
     },
   })

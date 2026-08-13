@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, FormEvent } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { getActiveBusinessId, getActiveBusinessRole } from "@/lib/business";
 import { isStaffManaging, outranks } from "@/lib/roles";
+import { supabase } from "@/lib/supabase";
 import { ErrorState } from "../ErrorState";
 
 interface Member {
@@ -35,6 +36,7 @@ interface Task {
   priority: "low" | "medium" | "high";
   dueAt: string | null;
   createdBy: string;
+  requiresProof: boolean;
   assignments: Assignment[];
 }
 
@@ -72,6 +74,7 @@ export default function TasksPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
   const [dragOverStatus, setDragOverStatus] = useState<Task["status"] | null>(null);
+  const [completingTask, setCompletingTask] = useState<Task | null>(null);
 
   const businessId = getActiveBusinessId();
   const role = getActiveBusinessRole();
@@ -126,7 +129,15 @@ export default function TasksPage() {
     setDragOverStatus(null);
     const taskId = e.dataTransfer.getData("text/plain");
     const task = tasks.find((t) => t.id === taskId);
-    if (task && task.status !== status && isAssignee(task)) updateStatus(taskId, status);
+    if (!task || task.status === status || !isAssignee(task)) return;
+    // Completing a task always asks how it was done — and for a proof document too, if
+    // the task was created requiring one — so "done" opens that modal instead of moving
+    // the card immediately.
+    if (status === "done") {
+      setCompletingTask(task);
+    } else {
+      updateStatus(taskId, status);
+    }
   }
 
   const workload = useMemo(() => {
@@ -297,6 +308,18 @@ export default function TasksPage() {
           }}
         />
       )}
+
+      {completingTask && businessId && (
+        <CompleteTaskModal
+          task={completingTask}
+          businessId={businessId}
+          onClose={() => setCompletingTask(null)}
+          onDone={() => {
+            setCompletingTask(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -307,6 +330,7 @@ interface TaskFormData {
   priority: string;
   dueAt?: string | null;
   assigneeIds: string[];
+  requiresProof: boolean;
 }
 
 function TaskFormModal({
@@ -325,6 +349,7 @@ function TaskFormModal({
   const [priority, setPriority] = useState<string>(initial?.priority ?? "medium");
   const [dueAt, setDueAt] = useState(initial?.dueAt ? initial.dueAt.slice(0, 10) : "");
   const [assigneeIds, setAssigneeIds] = useState<string[]>(initial?.assignments.map((a) => a.userId) ?? []);
+  const [requiresProof, setRequiresProof] = useState(initial?.requiresProof ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -344,6 +369,7 @@ function TaskFormModal({
         priority,
         dueAt: dueAt ? new Date(dueAt).toISOString() : initial ? null : undefined,
         assigneeIds,
+        requiresProof,
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save task");
@@ -393,6 +419,16 @@ function TaskFormModal({
             />
           </div>
 
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={requiresProof}
+              onChange={(e) => setRequiresProof(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            Require a proof document when marking this task done
+          </label>
+
           {members.length > 0 && (
             <div>
               <p className="mb-1 text-xs font-medium uppercase text-gray-400">Assignees</p>
@@ -435,6 +471,161 @@ function TaskFormModal({
               className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const MAX_PROOF_FILE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PROOF_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "text/csv",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+]);
+
+function CompleteTaskModal({
+  task,
+  businessId,
+  onClose,
+  onDone,
+}: {
+  task: Task;
+  businessId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"idle" | "uploading" | "saving">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  function pickFile(f: File | null) {
+    setFileError(null);
+    if (!f) {
+      setFile(null);
+      return;
+    }
+    if (f.type.startsWith("video/")) {
+      setFileError("Video files aren't accepted as proof.");
+      return;
+    }
+    if (f.size > MAX_PROOF_FILE_BYTES) {
+      setFileError("File must be 5MB or smaller.");
+      return;
+    }
+    if (!ALLOWED_PROOF_MIME_TYPES.has(f.type)) {
+      setFileError("Unsupported file type — PDF, Word, Excel, text, or image files only.");
+      return;
+    }
+    setFile(f);
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!description.trim()) return;
+    if (task.requiresProof && !file) {
+      setFileError("This task requires a proof document.");
+      return;
+    }
+    setError(null);
+
+    try {
+      let proofPath: string | undefined;
+      if (file) {
+        setPhase("uploading");
+        const { path, token } = await apiFetch<{ path: string; token: string }>(
+          `/api/v1/businesses/${businessId}/tasks/${task.id}/proof-upload-url`,
+          { method: "POST", body: JSON.stringify({ fileName: file.name, fileSize: file.size, fileType: file.type }) }
+        );
+        const { error: uploadError } = await supabase.storage.from("task-proofs").uploadToSignedUrl(path, token, file);
+        if (uploadError) throw new Error(uploadError.message);
+        proofPath = path;
+      }
+
+      setPhase("saving");
+      await apiFetch(`/api/v1/businesses/${businessId}/tasks/${task.id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "done",
+          completionDescription: description,
+          ...(proofPath ? { proofPath, proofFileName: file!.name, proofFileSize: file!.size, proofFileType: file!.type } : {}),
+        }),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Failed to complete task");
+      setPhase("idle");
+    }
+  }
+
+  const busy = phase !== "idle";
+
+  return (
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-card border border-gray-200 bg-white p-6 shadow-lg"
+      >
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">Mark "{task.title}" done</h2>
+        <p className="mb-4 text-xs text-gray-400">
+          {task.requiresProof ? "This task requires a proof document." : "Describe how you completed it."}
+        </p>
+
+        <div className="flex flex-col gap-3">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Short description of how this was completed"
+            rows={3}
+            required
+            className="rounded-card border border-gray-300 px-3 py-2 text-sm"
+          />
+
+          {task.requiresProof && (
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase text-gray-400">Proof document</p>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*"
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm text-gray-600 file:mr-3 file:rounded-card file:border-0 file:bg-gray-200 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-300"
+              />
+              <p className="mt-1 text-[11px] text-gray-400">PDF, Word, Excel, text, or image — up to 5MB, no video.</p>
+              {fileError && <p className="mt-1 text-xs text-danger">{fileError}</p>}
+            </div>
+          )}
+
+          {error && <p className="text-sm text-danger">{error}</p>}
+
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="rounded-card border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !!fileError}
+              className="rounded-card bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {phase === "uploading" ? "Uploading…" : phase === "saving" ? "Saving…" : "Mark done"}
             </button>
           </div>
         </div>

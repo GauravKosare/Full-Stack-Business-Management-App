@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { getActiveBusinessId, getActiveBusinessRole } from "@/lib/business";
+import { getActiveBusinessId, getActiveBusinessRole, getCachedBusinessName, setCachedBusinessName } from "@/lib/business";
 import { ErrorState } from "../ErrorState";
 
 interface Me {
@@ -64,9 +64,23 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const businessId = getActiveBusinessId();
+
+    // Instant paint from cache/localStorage (role is already known synchronously — it's
+    // what gated access to this page) while the real fetch confirms/updates it below.
+    if (businessId) {
+      const cachedName = getCachedBusinessName(businessId);
+      const role = getActiveBusinessRole();
+      if (cachedName && role) setBusiness({ id: businessId, name: cachedName, role });
+    }
+
     const requests: Promise<unknown>[] = [apiFetch<Me>("/api/v1/auth/me").then(setMe)];
     if (businessId) {
-      requests.push(apiFetch<Business>(`/api/v1/businesses/${businessId}`).then(setBusiness));
+      requests.push(
+        apiFetch<Business>(`/api/v1/businesses/${businessId}`).then((b) => {
+          setBusiness(b);
+          setCachedBusinessName(businessId, b.name);
+        })
+      );
     }
     requests.push(
       apiFetch<NotificationItem[]>(`/api/v1/notifications?businessId=${businessId ?? ""}`).then((all) =>

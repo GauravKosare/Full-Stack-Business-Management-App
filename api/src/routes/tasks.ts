@@ -4,6 +4,14 @@ import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { createNotification } from "../lib/notifications";
 import { STAFF_MANAGING_ROLES, outranks } from "../lib/roles";
+import {
+  isStorageConfigured,
+  ALLOWED_PROOF_MIME_TYPES,
+  MAX_PROOF_FILE_BYTES,
+  proofObjectPath,
+  createProofUploadUrl,
+  createProofDownloadUrl,
+} from "../lib/storage";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRole } from "../middleware/requireRole";
 
@@ -47,6 +55,7 @@ const createTaskSchema = z.object({
   priority: z.enum(["low", "medium", "high"]).default("medium"),
   recurrenceRule: z.string().optional(),
   assigneeIds: z.array(z.string().uuid()).default([]),
+  requiresProof: z.boolean().default(false),
 });
 
 // POST /api/v1/businesses/:businessId/tasks — any staff-managing role (everyone but
@@ -75,6 +84,7 @@ tasksRouter.post("/", requireRole(...STAFF_MANAGING_ROLES), async (req: Request,
       dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : undefined,
       priority: parsed.data.priority,
       recurrenceRule: parsed.data.recurrenceRule,
+      requiresProof: parsed.data.requiresProof,
       createdBy: req.userId!,
       assignments: {
         create: parsed.data.assigneeIds.map((userId) => ({ userId })),
@@ -125,6 +135,14 @@ tasksRouter.get("/", async (req: Request, res: Response) => {
 
 const updateStatusSchema = z.object({
   status: z.enum(["open", "in_progress", "done", "canceled"]),
+  // Only meaningful (and validated) when status is "done" — see the completion-specific
+  // checks below. A task created with requiresProof also needs proofPath; without it,
+  // just the description.
+  completionDescription: z.string().min(1).max(2000).optional(),
+  proofPath: z.string().max(500).optional(),
+  proofFileName: z.string().max(200).optional(),
+  proofFileSize: z.number().int().positive().optional(),
+  proofFileType: z.string().max(100).optional(),
 });
 
 // PATCH /api/v1/businesses/:businessId/tasks/:taskId/status — assignee only. Deliberately
@@ -147,6 +165,23 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
     return res.status(403).json({ error: { code: "forbidden", message: "Not assigned to this task" } });
   }
 
+  const existingTask = await prisma.task.findFirst({ where: { id: taskId, businessId } });
+  if (!existingTask) {
+    return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
+  }
+
+  // Completing a task always requires a description of how it was done, and — if the
+  // task was created with requiresProof — an already-uploaded proof file's storage path.
+  // Both are enforced server-side, not just in the completion modal's UI.
+  if (parsed.data.status === "done") {
+    if (!parsed.data.completionDescription) {
+      return res.status(400).json({ error: { code: "bad_request", message: "A completion description is required" } });
+    }
+    if (existingTask.requiresProof && !parsed.data.proofPath) {
+      return res.status(400).json({ error: { code: "bad_request", message: "This task requires a proof document to complete" } });
+    }
+  }
+
   // Scope the update to this business too — without it, a valid taskId belonging to a
   // *different* business would still update, since ids are globally unique (IDOR).
   const { count } = await prisma.task.updateMany({
@@ -166,6 +201,21 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
       data: { completedAt: new Date() },
     });
 
+    // Upsert — re-completing a task you'd previously marked done (after it was reopened)
+    // replaces the earlier proof rather than colliding with the unique (task, user) index.
+    const proofFields = {
+      description: parsed.data.completionDescription!,
+      filePath: parsed.data.proofPath,
+      fileName: parsed.data.proofFileName,
+      fileSize: parsed.data.proofFileSize,
+      fileType: parsed.data.proofFileType,
+    };
+    await prisma.taskCompletionProof.upsert({
+      where: { taskId_userId: { taskId, userId: req.userId! } },
+      update: proofFields,
+      create: { taskId, userId: req.userId!, ...proofFields },
+    });
+
     const onTime = !task.dueAt || new Date() <= task.dueAt;
     await createNotification(task.createdBy, businessId, "task_completed", {
       taskId,
@@ -180,12 +230,96 @@ tasksRouter.patch("/:taskId/status", async (req: Request, res: Response) => {
   res.json(enriched);
 });
 
+// POST /api/v1/businesses/:businessId/tasks/:taskId/proof-upload-url — assignee only.
+// Returns a short-lived signed URL the browser uploads the file to directly, bypassing
+// our own server entirely (and its request-body size limits) — see lib/storage.ts.
+tasksRouter.post("/:taskId/proof-upload-url", async (req: Request, res: Response) => {
+  if (!isStorageConfigured) {
+    return res.status(501).json({ error: { code: "not_configured", message: "File storage is not configured on this server yet" } });
+  }
+
+  const fileSchema = z.object({
+    fileName: z.string().min(1).max(200),
+    fileSize: z.number().int().positive(),
+    fileType: z.string().min(1),
+  });
+  const parsed = fileSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "bad_request", message: parsed.error.message } });
+  }
+
+  if (parsed.data.fileSize > MAX_PROOF_FILE_BYTES) {
+    return res.status(400).json({ error: { code: "bad_request", message: "File must be 5MB or smaller" } });
+  }
+  if (!ALLOWED_PROOF_MIME_TYPES.has(parsed.data.fileType)) {
+    return res.status(400).json({
+      error: { code: "bad_request", message: "Unsupported file type — PDF, Word, Excel, text, or image files only (no video)" },
+    });
+  }
+
+  const businessId = req.params.businessId as string;
+  const taskId = req.params.taskId as string;
+
+  const assignment = await prisma.taskAssignment.findUnique({
+    where: { taskId_userId: { taskId, userId: req.userId! } },
+  });
+  if (!assignment) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Not assigned to this task" } });
+  }
+
+  const path = proofObjectPath(businessId, taskId, req.userId!, parsed.data.fileName);
+  const upload = await createProofUploadUrl(path);
+  res.json(upload);
+});
+
+// GET /api/v1/businesses/:businessId/tasks/:taskId/completion-proof — the task's
+// creator, the business owner, or the assignee who completed it can see the proof.
+tasksRouter.get("/:taskId/completion-proof", async (req: Request, res: Response) => {
+  const businessId = req.params.businessId as string;
+  const taskId = req.params.taskId as string;
+
+  const task = await prisma.task.findFirst({ where: { id: taskId, businessId } });
+  if (!task) {
+    return res.status(404).json({ error: { code: "not_found", message: "Task not found in this business" } });
+  }
+
+  const membership = await prisma.businessMember.findUnique({
+    where: { businessId_userId: { businessId, userId: req.userId! } },
+  });
+  const proof = await prisma.taskCompletionProof.findFirst({
+    where: { taskId },
+    include: { user: { select: { id: true, name: true } } },
+  });
+
+  const canView =
+    task.createdBy === req.userId! || membership?.role === "owner" || proof?.userId === req.userId!;
+  if (!canView) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Not authorized to view this proof" } });
+  }
+
+  if (!proof) {
+    return res.status(404).json({ error: { code: "not_found", message: "No completion proof recorded for this task" } });
+  }
+
+  const downloadUrl = proof.filePath && isStorageConfigured ? await createProofDownloadUrl(proof.filePath) : null;
+
+  res.json({
+    description: proof.description,
+    fileName: proof.fileName,
+    fileSize: proof.fileSize,
+    completedBy: proof.user,
+    createdAt: proof.createdAt,
+    downloadUrl,
+  });
+});
+
 const updateTaskSchema = z.object({
   title: z.string().min(1).max(300).optional(),
   description: z.string().max(5000).optional(),
   dueAt: z.string().datetime().nullable().optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
   assigneeIds: z.array(z.string().uuid()).optional(),
+  requiresProof: z.boolean().optional(),
 });
 
 // PATCH /api/v1/businesses/:businessId/tasks/:taskId — the task's own creator, or the

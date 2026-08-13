@@ -5,7 +5,13 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { getToken, clearToken } from "@/lib/auth";
-import { getActiveBusinessId, getActiveBusinessRole, clearActiveBusiness } from "@/lib/business";
+import {
+  getActiveBusinessId,
+  getActiveBusinessRole,
+  clearActiveBusiness,
+  getCachedBusinessName,
+  setCachedBusinessName,
+} from "@/lib/business";
 import { STAFF_MANAGING_ROLES, ROLE_LABELS } from "@/lib/roles";
 import NotificationBell from "./NotificationBell";
 import { DashboardIcon, TasksIcon, ChatIcon, TeamIcon, BillingIcon, ProfileIcon, CollapseIcon } from "./icons";
@@ -87,8 +93,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return;
     }
     setState({ status: "ready", role });
+
+    const cachedName = getCachedBusinessName(businessId);
+    if (cachedName) setBusiness({ name: cachedName });
     apiFetch<{ name: string }>(`/api/v1/businesses/${businessId}`)
-      .then(setBusiness)
+      .then((b) => {
+        setBusiness(b);
+        setCachedBusinessName(businessId, b.name);
+      })
       .catch(() => {});
     setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
   }, [router]);

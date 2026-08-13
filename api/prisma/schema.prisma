@@ -91,6 +91,7 @@ model User {
   notifications       Notification[]
   channelMemberships  ChannelMember[]
   sentMessages        Message[]
+  completionProofs    TaskCompletionProof[]
 
   @@map("users")
 }
@@ -167,16 +168,40 @@ model Task {
   priority         TaskPriority @default(medium)
   dueAt            DateTime?    @map("due_at")
   recurrenceRule   String?      @map("recurrence_rule")
+  // Set at creation, checked when the assignee marks the task done — if true, the
+  // completion modal requires an uploaded proof document, not just a description.
+  requiresProof    Boolean      @default(false) @map("requires_proof")
   createdBy        String       @map("created_by")
   creator          User         @relation("TaskCreator", fields: [createdBy], references: [id])
   createdAt        DateTime     @default(now()) @map("created_at")
   updatedAt        DateTime     @updatedAt @map("updated_at")
   deletedAt        DateTime?    @map("deleted_at")
 
-  assignments TaskAssignment[]
+  assignments       TaskAssignment[]
+  completionProofs  TaskCompletionProof[]
 
   @@index([businessId, status])
   @@map("tasks")
+}
+
+model TaskCompletionProof {
+  id          String   @id @default(uuid())
+  taskId      String   @map("task_id")
+  task        Task     @relation(fields: [taskId], references: [id])
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id])
+  description String
+  // Storage path within the private "task-proofs" Supabase bucket, not a public URL —
+  // reads always go through a short-lived signed URL our own API issues (see
+  // lib/storage.ts), never a direct public link.
+  filePath    String?  @map("file_path")
+  fileName    String?  @map("file_name")
+  fileSize    Int?     @map("file_size")
+  fileType    String?  @map("file_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([taskId, userId])
+  @@map("task_completion_proofs")
 }
 
 model TaskAssignment {
