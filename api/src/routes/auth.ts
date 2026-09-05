@@ -100,7 +100,7 @@ authRouter.get(
     next();
   },
   passport.authenticate("google", { session: false, failureRedirect: "/api/v1/auth/failure" }),
-  (req, res) => {
+  async (req, res) => {
     const user = req.user as User;
     const platform: Platform = req.cookies?.[OAUTH_PLATFORM_COOKIE] === "web" ? "web" : "mobile";
     const mobileRedirectUri = req.cookies?.[OAUTH_MOBILE_REDIRECT_COOKIE] as string | undefined;
@@ -115,7 +115,7 @@ authRouter.get(
     // JWT in a URL (browser history, referrer headers, server access logs) and keeps
     // requireAuth's bearer-token model identical across platforms — no cookie/CORS
     // complexity needed on the API side for web (see TRD §4).
-    const code = createOneTimeCode(user.id);
+    const code = await createOneTimeCode(user.id);
 
     const redirectBase =
       platform === "web"
@@ -142,13 +142,13 @@ authRouter.get(
 
 // POST /api/v1/auth/exchange — either client calls this immediately after receiving the
 // redirect to trade the one-time code for the actual JWT, over a direct HTTPS request.
-authRouter.post("/exchange", (req, res) => {
+authRouter.post("/exchange", async (req, res) => {
   const code = req.body?.code as string | undefined;
   if (!code) {
     return res.status(400).json({ error: { code: "bad_request", message: "Missing code" } });
   }
 
-  const userId = consumeOneTimeCode(code);
+  const userId = await consumeOneTimeCode(code);
   if (!userId) {
     return res.status(401).json({ error: { code: "invalid_code", message: "Code is invalid, used, or expired" } });
   }

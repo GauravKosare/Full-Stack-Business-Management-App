@@ -251,6 +251,21 @@ model Notification {
   @@map("notifications")
 }
 
+// Single-use, short-lived codes exchanged for a JWT right after an OAuth callback,
+// instead of putting the JWT itself in the redirect URL (custom mobile URL schemes can
+// leak the redirect to other apps on the device). Backed by Postgres rather than an
+// in-memory Map because the callback and the exchange request are two separate HTTP
+// requests that can land on two different serverless function instances — an in-memory
+// store on one instance is invisible to the other. See api/src/lib/oauthCodes.ts.
+model OneTimeCode {
+  code      String   @id
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("one_time_codes")
+}
+
 model Channel {
   id         String      @id @default(uuid())
   businessId String      @map("business_id")
