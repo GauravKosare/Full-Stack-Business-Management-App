@@ -8,3 +8,7 @@ dist/
 .expo/
 .DS_Store
 client_secret*.json
+
+# Raw dev screenshot captures — the curated, named copies used in the README
+# live in docs/screenshots/ instead.
+web/screenshots/
