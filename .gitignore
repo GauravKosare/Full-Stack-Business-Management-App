@@ -12,3 +12,9 @@ client_secret*.json
 # Raw dev screenshot captures — the curated, named copies used in the README
 # live in docs/screenshots/ instead.
 web/screenshots/
+
+# AI coding-assistant config/instructions — dev-tooling only, kept locally,
+# not published as part of this resume-facing repo.
+.claude/
+CLAUDE.md
+AGENTS.md
